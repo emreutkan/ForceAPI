@@ -217,30 +217,67 @@ python manage.py test achievements
 
 ## Deployment
 
+### Quick Start
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ### Production Checklist
 
 1. Set `LOCALHOST=False` in `.env`
-2. Set `DEBUG=False`
-3. Configure `ALLOWED_HOSTS`
+2. Set `DEBUG=False` (automatically set when LOCALHOST=False)
+3. Configure `ALLOWED_HOSTS` (required in production)
 4. Set up PostgreSQL database
-5. Configure email settings
-6. Set up static files collection
-7. Configure SSL/HTTPS
-8. Set up proper logging
-9. Configure CORS for production
-10. Set up monitoring and health checks
+5. Configure email settings (required for password reset)
+6. Set up SSL/HTTPS certificates (Let's Encrypt recommended)
+7. Configure environment variables (see `.env.example`)
+8. Run database migrations
+9. Collect static files
+10. Set up automated backups
+11. Configure error tracking (Sentry - optional)
+
+### Production Security Features
+
+The backend includes production security settings:
+- HTTPS enforcement (SECURE_SSL_REDIRECT)
+- HTTP Strict Transport Security (HSTS)
+- Secure cookies (SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE)
+- Security headers (X-Frame-Options, X-Content-Type-Options, etc.)
+- Rate limiting to prevent abuse
+- Input validation and sanitization
 
 ### Static Files
 
 ```bash
+# In Docker
+docker-compose exec web python manage.py collectstatic --noinput
+
+# Local
 python manage.py collectstatic
 ```
 
 ### Database Migrations
 
 ```bash
+# In Docker
+docker-compose exec web python manage.py migrate
+
+# Local
 python manage.py migrate
 ```
+
+### Database Backups
+
+Automated backup scripts are available:
+
+```bash
+# Create backup
+./scripts/backup_database.sh
+
+# Restore from backup
+./scripts/restore_database.sh backups/utrack_backup_YYYYMMDD_HHMMSS.sql.gz
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed backup procedures.
 
 ## Project Structure
 
@@ -296,6 +333,36 @@ All API errors follow a standardized format:
 
 [Add your license here]
 
+## Production API Information
+
+### Base URL
+- **Production**: `https://api.utrack.irfanemreutkan.com`
+- **Development**: `http://localhost:8000`
+
+### Authentication
+- JWT tokens (Bearer token in Authorization header)
+- Access token lifetime: 60 minutes
+- Refresh token lifetime: 7 days
+- Token refresh endpoint: `POST /api/user/token/refresh/`
+
+### API Documentation
+- **Swagger UI**: `https://api.utrack.irfanemreutkan.com/api/docs/`
+- **ReDoc**: `https://api.utrack.irfanemreutkan.com/api/redoc/`
+- **OpenAPI Schema**: `https://api.utrack.irfanemreutkan.com/api/schema/`
+
+### Mobile App Integration
+
+For mobile app developers:
+- CORS is configured but not required (mobile apps don't use browsers)
+- Use JWT Bearer tokens for authentication
+- Handle standardized error format (see Error Handling section)
+- Implement token refresh logic
+- Respect rate limits (see Rate Limiting section)
+
 ## Support
 
-For issues and questions, please open an issue on GitHub.
+For issues and questions:
+1. Check [DEPLOYMENT.md](DEPLOYMENT.md) for deployment issues
+2. Review [FRONTEND_IMPLEMENTATION_GUIDE.md](FRONTEND_IMPLEMENTATION_GUIDE.md) for API integration
+3. Open an issue on GitHub
+4. Check API documentation at `/api/docs/`
