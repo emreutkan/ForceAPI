@@ -32,6 +32,32 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 # 1. Core Settings (Typed automatically)
 SECRET_KEY = env('SECRET_KEY')
+LOCALHOST = env('LOCALHOST')  # Read early for Sentry initialization
+
+# Sentry error tracking (optional) - initialize early
+SENTRY_DSN = os.environ.get('SENTRY_DSN')
+if SENTRY_DSN and LOCALHOST == 'False':
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(
+                transaction_style='url',
+                middleware_spans=True,
+                signals_spans=True,
+            ),
+            LoggingIntegration(
+                level=None,  # Capture all logs
+                event_level=None,  # Send all events
+            ),
+        ],
+        traces_sample_rate=0.1,  # 10% of transactions
+        send_default_pii=False,  # Don't send personally identifiable information
+        environment='production',
+    )
 
 
 
