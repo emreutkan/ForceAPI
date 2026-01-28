@@ -32,6 +32,40 @@ environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 # 1. Core Settings (Typed automatically)
 SECRET_KEY = env('SECRET_KEY')
+LOCALHOST = env('LOCALHOST')  # Read early for Sentry initialization
+
+# Sentry error tracking (optional) - initialize early
+SENTRY_DSN = os.environ.get('SENTRY_DSN')
+if SENTRY_DSN and LOCALHOST == 'False':
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+    
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(
+                transaction_style='url',
+                middleware_spans=True,
+                signals_spans=True,
+            ),
+            LoggingIntegration(
+                level=None,  # Capture all logs
+                event_level=None,  # Send all events
+            ),
+        ],
+        traces_sample_rate=0.1,  # 10% of transactions
+        send_default_pii=False,  # Don't send personally identifiable information
+        environment='production',
+    )
+
+# Validate SECRET_KEY in production
+if LOCALHOST == 'False':
+    if not SECRET_KEY or SECRET_KEY == 'your-secret-key-here' or len(SECRET_KEY) < 50:
+        raise ValueError(
+            "SECRET_KEY must be set to a secure random value in production. "
+            "Generate one using: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
+        )
 
 
 
@@ -46,7 +80,6 @@ EC2_ELASTIC_IP = env('EC2_ELASTIC_IP')
 POSTGRES_USER = env('POSTGRES_USER', default="")
 POSTGRES_PASSWORD = env('POSTGRES_PASSWORD', default="")
 POSTGRES_DB = env('POSTGRES_DB', default="")
-LOCALHOST = env('LOCALHOST')
 # Suppress specific warnings from dj_rest_auth regarding allauth deprecations
 warnings.filterwarnings('ignore', message='.*app_settings.USERNAME_REQUIRED is deprecated.*')
 warnings.filterwarnings('ignore', message='.*app_settings.EMAIL_REQUIRED is deprecated.*')
@@ -88,6 +121,12 @@ elif LOCALHOST == 'True' and DATABASE_URL: # Localhost is True and DATABASE_URL 
 elif LOCALHOST == 'False' and DATABASE_URL: # Localhost is False and DATABASE_URL is set - could be Docker or EC2
     DEBUG = False
     ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
+    
+    # Validate production environment variables
+    if not ALLOWED_HOSTS:
+        raise ValueError("ALLOWED_HOSTS must be set in production. Set it in your .env file as a comma-separated list.")
+    
+    # Email settings will be validated in the Email Configuration section below
     # Check if we're in Docker (DATABASE_URL contains 'db:5432') or EC2 manual install
     if 'db:5432' in DATABASE_URL:
         # We're in Docker, use 'db' as host
@@ -100,7 +139,26 @@ elif LOCALHOST == 'False' and DATABASE_URL: # Localhost is False and DATABASE_UR
     DATABASES = {
         'default': env.db('DATABASE_URL')
     }
-    CSRF_TRUSTED_ORIGINS = ['https://api.utrack.irfanemreutkan.com'] 
+    CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['https://api.utrack.irfanemreutkan.com'])
+    
+    # Production Security Settings
+    # SECURE_SSL_REDIRECT: Set to False if SSL is terminated at load balancer/proxy
+    # Set to True if Django handles SSL directly
+    SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=False)
+    
+    # If SSL is terminated externally, trust the X-Forwarded-Proto header
+    if not SECURE_SSL_REDIRECT:
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    
+    SECURE_HSTS_SECONDS = 31536000  # 1 year - HTTP Strict Transport Security
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True  # Prevent MIME sniffing
+    SECURE_BROWSER_XSS_FILTER = True  # XSS protection
+    X_FRAME_OPTIONS = 'DENY'  # Prevent clickjacking
+    SESSION_COOKIE_SECURE = True  # Secure session cookies
+    CSRF_COOKIE_SECURE = True  # Secure CSRF cookies
+    SESSION_COOKIE_HTTPONLY = True  # Prevent XSS on cookies 
 elif LOCALHOST == 'False' and not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set")
 else:
@@ -233,6 +291,14 @@ else:
     EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
     EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
     DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
+    
+    # Validate email settings in production
+    if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
+        import warnings
+        warnings.warn(
+            "EMAIL_HOST_USER and EMAIL_HOST_PASSWORD should be set in production for email functionality.",
+            UserWarning
+        )
 
 # Frontend URL for email links
 FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
@@ -243,7 +309,15 @@ FRONTEND_URL = env('FRONTEND_URL', default='http://localhost:3000')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Settings
-CORS_ALLOW_ALL_ORIGINS = True # For dev, allow everyone. Safer than listing specific IPs if you move around.
+# For mobile apps, CORS is less critical but should still be configured
+if LOCALHOST == 'True':
+    CORS_ALLOW_ALL_ORIGINS = True  # Development: allow all origins
+    CORS_ALLOW_CREDENTIALS = True
+else:
+    # Production: configure from environment or allow all (mobile apps don't use browsers)
+    CORS_ALLOW_ALL_ORIGINS = env.bool('CORS_ALLOW_ALL_ORIGINS', default=True)
+    CORS_ALLOWED_ORIGINS = env.list('CORS_ALLOWED_ORIGINS', default=[])
+    CORS_ALLOW_CREDENTIALS = env.bool('CORS_ALLOW_CREDENTIALS', default=True)
 
 # CSRF Settings
 
