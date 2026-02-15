@@ -55,7 +55,7 @@ APPLE_KEY_ID = env('APPLE_KEY_ID')
 APPLE_TEAM_ID = env('APPLE_TEAM_ID')
 APPLE_CLIENT_ID = env('APPLE_CLIENT_ID')
 APPLE_PRIVATE_KEY = env('APPLE_PRIVATE_KEY').replace('\\n', '\n') # Fixes newline issues in keys
-EC2_ELASTIC_IP = env('EC2_ELASTIC_IP')
+DEPLOY_HOST = env('DEPLOY_HOST', default='')
 POSTGRES_USER = env('POSTGRES_USER', default="")
 POSTGRES_PASSWORD = env('POSTGRES_PASSWORD', default="")
 POSTGRES_DB = env('POSTGRES_DB', default="")
@@ -97,7 +97,7 @@ elif LOCALHOST == 'True' and DATABASE_URL: # Localhost is True and DATABASE_URL 
         'default': env.db('DATABASE_URL')
     }
 
-elif LOCALHOST == 'False' and DATABASE_URL: # Localhost is False and DATABASE_URL is set - could be Docker or EC2
+elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     DEBUG = False
     ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
     
@@ -105,14 +105,10 @@ elif LOCALHOST == 'False' and DATABASE_URL: # Localhost is False and DATABASE_UR
     if not ALLOWED_HOSTS:
         raise ValueError("ALLOWED_HOSTS must be set in production. Set it in your .env file as a comma-separated list.")
     
-    # Email settings will be validated in the Email Configuration section below
-    # Check if we're in Docker (DATABASE_URL contains 'db:5432') or EC2 manual install
     if 'db:5432' in DATABASE_URL:
-        # We're in Docker, use 'db' as host
         DB_HOST = 'db'
         DB_PORT = 5432
     else:
-        # We're in EC2 manual install, use env values
         DB_HOST = env('DB_HOST', default='localhost')
         DB_PORT = env('DB_PORT', default='5432')
     DATABASES = {

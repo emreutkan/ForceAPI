@@ -1,7 +1,7 @@
-name: Bootstrap EC2 for Docker
+name: Bootstrap Oracle Cloud (OCI) – Docker
 
 on:
-  workflow_dispatch: # Manual trigger only
+  workflow_dispatch:
 
 jobs:
   bootstrap:
@@ -10,15 +10,16 @@ jobs:
       - name: Bootstrap via SSH
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.EC2_ELASTIC_IP }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             export SECRET_KEY="${{ secrets.SECRET_KEY }}"
             export POSTGRES_DB="${{ secrets.POSTGRES_DB }}"
             export POSTGRES_USER="${{ secrets.POSTGRES_USER }}"
             export POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
             export ALLOWED_HOSTS="${{ secrets.ALLOWED_HOSTS }}"
+            export DEPLOY_HOST="${{ secrets.DEPLOY_HOST }}"
             curl -fsSL https://raw.githubusercontent.com/emreutkan/utrack-be/master/bootstrap_docker.sh > bootstrap_docker.sh
             chmod +x bootstrap_docker.sh
             ./bootstrap_docker.sh

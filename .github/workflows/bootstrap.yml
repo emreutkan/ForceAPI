@@ -1,29 +1,27 @@
-name: Bootstrap EC2 Environment (Manual)
+name: Bootstrap Oracle Cloud (OCI) – Manual install
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  workflow_dispatch:
 
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Bootstrap EC2 via SSH
+    - name: Bootstrap via SSH
       uses: appleboy/ssh-action@master
       with:
-        host: ${{ secrets.EC2_ELASTIC_IP }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        # 1. Declare which variables should be passed to the remote shell
-        envs: POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,SECRET_KEY,ALLOWED_HOSTS,EC2_HOST
-        # 2. Map the GitHub Secrets to those variables
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        envs: POSTGRES_DB,POSTGRES_USER,POSTGRES_PASSWORD,SECRET_KEY,ALLOWED_HOSTS,DEPLOY_HOST
         env:
           POSTGRES_DB="${{ secrets.POSTGRES_DB }}"
           POSTGRES_USER="${{ secrets.POSTGRES_USER }}"
           POSTGRES_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
           SECRET_KEY="${{ secrets.SECRET_KEY }}"
           ALLOWED_HOSTS="${{ secrets.ALLOWED_HOSTS }}"
-          EC2_ELASTIC_IP="${{ secrets.EC2_ELASTIC_IP }}"
+          DEPLOY_HOST="${{ secrets.DEPLOY_HOST }}"
         script: |
           set -e
           

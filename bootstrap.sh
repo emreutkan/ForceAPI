@@ -53,7 +53,7 @@ APPLE_KEY_ID=$APPLE_KEY_ID
 APPLE_TEAM_ID=$APPLE_TEAM_ID
 APPLE_CLIENT_ID=$APPLE_CLIENT_ID
 APPLE_PRIVATE_KEY=$APPLE_PRIVATE_KEY
-EC2_ELASTIC_IP=$EC2_ELASTIC_IP
+DEPLOY_HOST=$DEPLOY_HOST
 LOCALHOST=${LOCALHOST:-False}
 EOF
 
@@ -103,9 +103,10 @@ sudo sed -i "s|__PROJECT_DIR__|$PROJECT_DIR|g" /etc/systemd/system/utrack.servic
 # 8. Setup Nginx configuration
 echo "Setting up Nginx..."
 
-# Determine the host string before writing the file
-if [ -n "$EC2_ELASTIC_IP" ]; then
-    FINAL_HOST="$EC2_ELASTIC_IP"
+# Nginx server_name: OCI instance public IP or hostname
+SERVER_HOST="${DEPLOY_HOST}"
+if [ -n "$SERVER_HOST" ]; then
+    FINAL_HOST="$SERVER_HOST"
 else
     FINAL_HOST="${ALLOWED_HOSTS:-*}"
 fi
