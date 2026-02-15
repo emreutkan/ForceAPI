@@ -51,6 +51,9 @@ class CustomUser(AbstractUser, TimestampedModel):
     # Free trial fields
     trial_until = models.DateTimeField(null=True, blank=True, help_text="Free trial expiration date")
 
+    # Developer accounts (e.g. bypass rate limiting)
+    is_developer = models.BooleanField(default=False, help_text="Developer accounts bypass rate limiting")
+
     USERNAME_FIELD = 'email'  ## this tells Django that the email field is used for authentication instead of the username field
     REQUIRED_FIELDS = []
     

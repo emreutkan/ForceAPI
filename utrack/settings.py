@@ -278,6 +278,9 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Fixtures (e.g. datadump_clean.json for load_production_dump)
+FIXTURE_DIRS = [str(BASE_DIR)]
+
 # Email Configuration
 # Use console backend for development, SMTP for production
 if LOCALHOST == 'True':
