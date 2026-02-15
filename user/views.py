@@ -33,6 +33,8 @@ from django.template.loader import render_to_string
 from django.conf import settings
 import logging
 from django.db import transaction
+from django.db.models import Max
+from core.mixins import ConditionalGetMixin
 from workout.models import Workout, WorkoutExercise, ExerciseSet, TemplateWorkout, TemplateWorkoutExercise
 from supplements.models import UserSupplement, UserSupplementLog, Supplement
 from exercise.models import Exercise
@@ -56,9 +58,12 @@ class RegisterView(generics.CreateAPIView):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class UserProfileView(APIView):
+class UserProfileView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return getattr(request.user, "updated_at", None)
+
     def get(self, request):
         serializer = UserSerializer(request.user)
         return Response(serializer.data)
@@ -341,10 +346,13 @@ class WeightHistoryPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-class GetWeightHistoryView(APIView):
+class GetWeightHistoryView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = WeightHistoryPagination
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return WeightHistory.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/user/weight/
@@ -729,7 +737,7 @@ class CheckNameView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-class DataExportView(APIView):
+class DataExportView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

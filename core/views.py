@@ -6,15 +6,16 @@ from django.db import connection
 from django.core.cache import cache
 from django.conf import settings
 import time
+from core.mixins import ConditionalGetMixin
 
-class HealthCheckView(APIView):
+class HealthCheckView(ConditionalGetMixin, APIView):
     """
     GET /api/health/
     Health check endpoint for monitoring and deployment checks.
     Checks database connectivity, cache connectivity, and response times.
     """
     permission_classes = [AllowAny]
-    
+
     def get(self, request):
         start_time = time.time()
         health_status = {

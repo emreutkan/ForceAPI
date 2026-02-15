@@ -8,18 +8,22 @@ from .models import Supplement, UserSupplement, UserSupplementLog
 from .serializers import SupplementSerializer, UserSupplementSerializer, UserSupplementLogSerializer
 from django.views.decorators.cache import cache_page
 from django.utils.decorators import method_decorator
-from django.db.models import Q
+from django.db.models import Q, Max
 from django.utils import timezone
 from rest_framework.pagination import PageNumberPagination
+from core.mixins import ConditionalGetMixin
 
 class SupplementPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'page_size'
     max_page_size = 200
 
-class SupplementListView(APIView):
+class SupplementListView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = SupplementPagination
+
+    def get_last_modified(self, request, **kwargs):
+        return Supplement.objects.filter(is_active=True).aggregate(Max("updated_at"))["updated_at__max"]
 
     # Cache this view for 15 minutes (60 seconds * 15) 
     # django keeps cached data in memory for 15 minutes so it doesn't have to hit the database every time
@@ -41,9 +45,12 @@ class SupplementListView(APIView):
         serializer = SupplementSerializer(paginated_supplements, many=True)
         return paginator.get_paginated_response(serializer.data)
 
-class UserSupplementListCreateView(APIView):
+class UserSupplementListCreateView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = SupplementPagination
+
+    def get_last_modified(self, request, **kwargs):
+        return UserSupplement.objects.filter(user=request.user, is_active=True).aggregate(Max("updated_at"))["updated_at__max"]
 
     def get(self, request):
         user_supplements = UserSupplement.objects.filter(
@@ -63,7 +70,7 @@ class UserSupplementListCreateView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class UserSupplementLogListCreateView(APIView):
+class UserSupplementLogListCreateView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
@@ -85,6 +92,15 @@ class UserSupplementLogListCreateView(APIView):
             404: None
         }
     )
+    def get_last_modified(self, request, **kwargs):
+        user_supplement_id = request.query_params.get('user_supplement_id')
+        if not user_supplement_id:
+            return None
+        return UserSupplementLog.objects.filter(
+            user_supplement_id=user_supplement_id,
+            user_supplement__user=request.user,
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         # Require user_supplement_id to filter by specific supplement
         user_supplement_id = request.query_params.get('user_supplement_id')
@@ -128,8 +144,12 @@ class UserSupplementLogListCreateView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
   
-class UserSupplementLogTodayView(APIView):
+class UserSupplementLogTodayView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
+
+    def get_last_modified(self, request, **kwargs):
+        today = timezone.now().date()
+        return UserSupplementLog.objects.filter(user=request.user, date=today).aggregate(Max("updated_at"))["updated_at__max"]
 
     def get(self, request):
         today = timezone.now().date()

@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.db.models import Max
+from core.mixins import ConditionalGetMixin
 from ..models import Workout, WorkoutExercise, TemplateWorkout, TemplateWorkoutExercise
 from ..serializers import CreateTemplateWorkoutSerializer, GetTemplateWorkoutSerializer, GetWorkoutSerializer
 
@@ -21,9 +23,12 @@ class CreateTemplateWorkoutView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class GetTemplateWorkoutsView(APIView):
+class GetTemplateWorkoutsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return TemplateWorkout.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         template_workouts = TemplateWorkout.objects.filter(user=request.user).order_by('-created_at')
         serializer = GetTemplateWorkoutSerializer(template_workouts, many=True)

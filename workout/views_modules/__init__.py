@@ -11,6 +11,7 @@ from .workout_crud import (
     UpdateWorkoutView,
     DeleteWorkoutView,
     CompleteWorkoutView,
+    CheckPreviousWorkoutPerformedView,
     CheckWorkoutPerformedTodayView,
     TotalWorkoutsPerformedView,
     WorkoutPagination,
@@ -69,6 +70,7 @@ __all__ = [
     'UpdateWorkoutView',
     'DeleteWorkoutView',
     'CompleteWorkoutView',
+    'CheckPreviousWorkoutPerformedView',
     'CheckWorkoutPerformedTodayView',
     'TotalWorkoutsPerformedView',
     # Exercises

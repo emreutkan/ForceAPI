@@ -6,13 +6,18 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+from core.mixins import ConditionalGetMixin
 from ..models import Workout
 from ..utils import get_rest_timer_state
 
 
-class GetRestTimerStateView(APIView):
+class GetRestTimerStateView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        w = Workout.objects.filter(user=request.user, is_done=False).values_list("updated_at", flat=True).first()
+        return w
+
     def get(self, request):
         """
         GET /api/workout/active/rest-timer/
@@ -42,9 +47,13 @@ class GetRestTimerStateView(APIView):
             )
 
 
-class StopRestTimerView(APIView):
+class StopRestTimerView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        w = Workout.objects.filter(user=request.user, is_done=False).values_list("updated_at", flat=True).first()
+        return w
+
     def get(self, request):
         """
         GET /api/workout/active/rest-timer/stop
@@ -78,9 +87,13 @@ class StopRestTimerView(APIView):
             )
 
 
-class ResumeRestTimerView(APIView):
+class ResumeRestTimerView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        w = Workout.objects.filter(user=request.user, is_done=False).values_list("updated_at", flat=True).first()
+        return w
+
     def get(self, request):
         """
         GET /api/workout/active/rest-timer/resume

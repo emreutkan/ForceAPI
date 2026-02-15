@@ -7,14 +7,21 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from django.db import models
+from django.db.models import Max
+from core.mixins import ConditionalGetMixin
 from ..models import Workout, WorkoutExercise, TrainingResearch, MuscleRecovery, CNSRecovery
 from ..serializers import TrainingResearchSerializer, MuscleRecoverySerializer, CNSRecoverySerializer
 from ..permissions import is_pro_user, get_pro_response
 
 
-class GetRecoveryRecommendationsView(APIView):
+class GetRecoveryRecommendationsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(
+            user=request.user, is_done=True, is_rest_day=False
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/workout/recommendations/recovery/
@@ -89,9 +96,15 @@ class GetRecoveryRecommendationsView(APIView):
         })
 
 
-class GetRestPeriodRecommendationsView(APIView):
+class GetRestPeriodRecommendationsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, workout_exercise_id=None, **kwargs):
+        w = WorkoutExercise.objects.filter(
+            id=workout_exercise_id, workout__user=request.user
+        ).values_list("updated_at", flat=True).first()
+        return w
+
     def get(self, request, workout_exercise_id):
         """
         GET /api/workout/exercise/<workout_exercise_id>/rest-recommendations/
@@ -146,9 +159,9 @@ class GetRestPeriodRecommendationsView(APIView):
         })
 
 
-class GetTrainingFrequencyRecommendationsView(APIView):
+class GetTrainingFrequencyRecommendationsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         """
         GET /api/workout/recommendations/frequency/
@@ -190,9 +203,9 @@ class GetTrainingFrequencyRecommendationsView(APIView):
         return Response(recommendations)
 
 
-class GetRelevantResearchView(APIView):
+class GetRelevantResearchView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         """
         GET /api/workout/research/
@@ -233,9 +246,12 @@ class GetRelevantResearchView(APIView):
         return Response(serializer.data)
 
 
-class GetMuscleRecoveryStatusView(APIView):
+class GetMuscleRecoveryStatusView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return MuscleRecovery.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         Get current recovery status for all muscle groups.

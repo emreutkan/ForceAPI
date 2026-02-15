@@ -3,6 +3,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
+from django.db.models import Max
+from core.mixins import ConditionalGetMixin
 from .models import BodyMeasurement
 from .serializers import BodyMeasurementSerializer, CalculateBodyFatSerializer
 import math
@@ -34,10 +36,13 @@ class CreateBodyMeasurementView(APIView):
             return Response(BodyMeasurementSerializer(measurement).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-class GetBodyMeasurementsView(APIView):
+class GetBodyMeasurementsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = BodyMeasurementPagination
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return BodyMeasurement.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/measurements/

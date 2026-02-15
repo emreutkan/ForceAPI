@@ -31,7 +31,6 @@ urlpatterns = [
     path('api/supplements/', include('supplements.urls')),
     path('api/exercise/', include('exercise.url')),
     path('api/measurements/', include('body_measurements.urls')),
-    path('api/achievements/', include('achievements.urls')),
 
     path('auth/google/', GoogleLogin.as_view(), name='google_login'),
     path('auth/apple/', AppleLogin.as_view(), name='apple_login'),

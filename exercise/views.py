@@ -10,18 +10,22 @@ from rest_framework import status
 from workout.models import Workout, WorkoutExercise
 from django.core.cache import cache
 from rest_framework.pagination import PageNumberPagination
-from django.db.models import Q
+from django.db.models import Q, Max
+from core.mixins import ConditionalGetMixin
 
 class ExercisePagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'page_size'
     max_page_size = 200
 
-class ExerciseListView(APIView):
+class ExerciseListView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = ExercisePagination
     queryset = Exercise.objects.all()
     serializer_class = ExerciseSerializer
+
+    def get_last_modified(self, request, **kwargs):
+        return Exercise.objects.filter(is_active=True).aggregate(Max("updated_at"))["updated_at__max"]
 
     def get(self, request):
         query = request.query_params.get('search', None)

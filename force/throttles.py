@@ -63,3 +63,11 @@ class RegistrationRateThrottle(AnonRateThrottle):
     Rate limiting for registration endpoints.
     """
     scope = 'registration'
+
+
+class CheckDateRateThrottle(DeveloperBypassMixin, UserRateThrottle):
+    """
+    Rate limiting for check-date / check previous workout endpoints.
+    Prevents abuse when polling or scanning many dates.
+    """
+    scope = 'check_date'

@@ -6,16 +6,23 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
+from django.db.models import Max
 from datetime import datetime, timedelta
 from collections import defaultdict
 from exercise.models import Exercise
+from core.mixins import ConditionalGetMixin
 from ..models import Workout, WorkoutExercise, WorkoutMuscleRecovery
 from ..permissions import is_pro_user
 
 
-class VolumeAnalysisView(APIView):
+class VolumeAnalysisView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(
+            user=request.user, is_done=True, is_rest_day=False
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/workout/volume-analysis/
@@ -180,9 +187,14 @@ class VolumeAnalysisView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-class WorkoutSummaryView(APIView):
+class WorkoutSummaryView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, workout_id=None, **kwargs):
+        if workout_id:
+            return Workout.objects.filter(id=workout_id, user=request.user).values_list("updated_at", flat=True).first()
+        return None
+
     def get(self, request, workout_id):
         """
         GET /api/workout/<workout_id>/summary/

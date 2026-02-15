@@ -187,7 +187,6 @@ INSTALLED_APPS = [
     'workout', # Add workout app
     'supplements', # Add supplements app
     'body_measurements', # Add body measurements app
-    'achievements', # Add achievements app
     'django.contrib.sites',       # Required by allauth
     'allauth',
     'allauth.account',
@@ -385,6 +384,7 @@ REST_FRAMEWORK = {
         'login': '5/minute',             # 5 login attempts per minute (prevent brute force)
         'registration': '3/hour',        # 3 registrations per hour per IP
         'password_reset': '3/hour',      # 3 password reset requests per hour
+        'check_date': '30/minute',       # check-date / check previous workout per user
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'utrack.exceptions.custom_exception_handler',

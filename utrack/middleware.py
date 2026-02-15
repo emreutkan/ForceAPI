@@ -7,6 +7,16 @@ from django.conf import settings
 logger = logging.getLogger('utrack.requests')
 error_logger = logging.getLogger('utrack')
 
+
+def _safe_log_str(s: str, max_length: int | None = None) -> str:
+    """Make string safe for logging on streams that may use cp1252 or other non-UTF-8 encoding."""
+    if not isinstance(s, str):
+        s = str(s)
+    s = s.encode('ascii', errors='replace').decode('ascii')
+    if max_length is not None and len(s) > max_length:
+        s = s[:max_length] + '...'
+    return s
+
 class RequestResponseLogMiddleware(MiddlewareMixin):
     """
     Logs all HTTP requests and responses with timing information.
@@ -22,20 +32,11 @@ class RequestResponseLogMiddleware(MiddlewareMixin):
     ]
     
     def process_request(self, request):
-        """Log incoming request"""
+        """Log incoming request. User is not logged here because auth (e.g. JWT) runs later in the stack."""
         request.start_time = time.time()
-        
-        # Get user info
-        user = getattr(request, 'user', None)
-        user_str = user.email if user and user.is_authenticated else 'anonymous'
-        
-        # Get IP address
         ip = self.get_client_ip(request)
-        
-        # Log basic request info
         logger.info(
-            f"REQUEST: {request.method} {request.get_full_path()} | "
-            f"User: {user_str} | IP: {ip}"
+            f"REQUEST: {request.method} {request.get_full_path()} | IP: {ip}"
         )
         
         # Log request body for non-sensitive endpoints (only in DEBUG mode or for specific endpoints)
@@ -86,14 +87,15 @@ class RequestResponseLogMiddleware(MiddlewareMixin):
                             if content_str.startswith('{') or content_str.startswith('['):
                                 try:
                                     response_json = json.loads(content_str)
-                                    # Limit size to prevent huge logs
+                                    # Limit size to prevent huge logs; sanitize for Windows cp1252 log streams
                                     if len(content_str) < 5000:
-                                        logger.info(f"Response JSON:\n{json.dumps(response_json, indent=2)}")
+                                        log_body = _safe_log_str(json.dumps(response_json, indent=2, ensure_ascii=False))
+                                        logger.info(f"Response JSON:\n{log_body}")
                                     else:
-                                        logger.info(f"Response JSON (truncated): {content_str[:500]}...")
+                                        logger.info(f"Response JSON (truncated): {_safe_log_str(content_str, max_length=500)}...")
                                 except json.JSONDecodeError:
                                     # Not JSON, log as text (truncated)
-                                    logger.debug(f"Response body: {content_str[:200]}")
+                                    logger.debug(f"Response body: {_safe_log_str(content_str, max_length=200)}")
                         except UnicodeDecodeError:
                             pass
             except Exception as e:

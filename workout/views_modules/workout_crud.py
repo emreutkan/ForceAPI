@@ -5,11 +5,19 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+
+try:
+    from utrack.throttles import CheckDateRateThrottle
+except ImportError:
+    from force.throttles import CheckDateRateThrottle
 from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
+from django.utils.http import http_date
+from django.db.models import Max
 from datetime import datetime, time
 from django.core.cache import cache
 import logging
+from core.mixins import ConditionalGetMixin, CACHE_MAX_AGE_SECONDS
 from ..models import Workout, WorkoutExercise
 from ..serializers import CreateWorkoutSerializer, GetWorkoutSerializer, UpdateWorkoutSerializer
 from ..utils import (
@@ -118,9 +126,20 @@ class CreateWorkoutView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-class GetWorkoutView(APIView):
+class GetWorkoutView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
     pagination_class = WorkoutPagination
+
+    def get_last_modified(self, request, workout_id=None, **kwargs):
+        if workout_id:
+            updated = Workout.objects.filter(
+                id=workout_id, user=request.user
+            ).values_list("updated_at", flat=True).first()
+            return updated
+        latest = Workout.objects.filter(
+            user=request.user, is_done=True
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+        return latest
 
     def get(self, request, workout_id=None):
         if workout_id:
@@ -144,12 +163,6 @@ class GetWorkoutView(APIView):
 
             should_cache = page == 1
 
-            if should_cache:
-                cache_key = f'workouts_list_user_{request.user.id}_page_1_size_{page_size}'
-                cached_response = cache.get(cache_key)
-                if cached_response is not None:
-                    return Response(cached_response)
-
             workouts = Workout.objects.filter(
                 user=request.user,
                 is_done=True
@@ -158,26 +171,47 @@ class GetWorkoutView(APIView):
                 'workoutexercise_set__sets'
             ).order_by('-created_at')
 
+            latest_modified = workouts.aggregate(Max('updated_at'))['updated_at__max']
+
+            if should_cache:
+                cache_key = f'workouts_list_user_{request.user.id}_page_1_size_{page_size}'
+                cached = cache.get(cache_key)
+                if cached is not None:
+                    response = Response(cached['data'])
+                    if cached.get('last_modified'):
+                        response['Last-Modified'] = cached['last_modified']
+                    response['Cache-Control'] = f'private, max-age={CACHE_MAX_AGE_SECONDS}'
+                    return response
+
             paginator = self.pagination_class()
             paginated_workouts = paginator.paginate_queryset(workouts, request)
             serializer = GetWorkoutSerializer(paginated_workouts, many=True)
             paginated_response = paginator.get_paginated_response(serializer.data)
 
             if should_cache:
-                cache.set(cache_key, paginated_response.data, 300)
+                cache_key = f'workouts_list_user_{request.user.id}_page_1_size_{page_size}'
+                cache.set(cache_key, {
+                    'data': paginated_response.data,
+                    'last_modified': http_date(int(latest_modified.timestamp()))
+                    if latest_modified else None,
+                }, 300)
 
             return paginated_response
 
 
-class GetActiveWorkoutView(APIView):
+class GetActiveWorkoutView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
+
+    def get_last_modified(self, request, **kwargs):
+        w = Workout.objects.filter(user=request.user, is_done=False).values_list("updated_at", flat=True).first()
+        return w
 
     def get(self, request):
         active_workout = Workout.objects.filter(user=request.user, is_done=False).first()
         if active_workout:
             serializer = GetWorkoutSerializer(active_workout, context={'include_insights': True})
-            return Response(serializer.data)
-        return Response({'error': 'No active workout found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'active_workout': serializer.data})
+        return Response({'active_workout': None}, status=status.HTTP_200_OK)
 
 
 class UpdateWorkoutView(APIView):
@@ -289,28 +323,121 @@ class CompleteWorkoutView(APIView):
             return Response({'error': 'Workout not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
-# class CheckPreviousWorkoutPerformedView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-
-class CheckWorkoutPerformedTodayView(APIView):
+class CheckPreviousWorkoutPerformedView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [CheckDateRateThrottle]
 
     def get(self, request):
+        day = request.query_params.get('day')
+        month = request.query_params.get('month')
+        year = request.query_params.get('year')
+        date_str = request.query_params.get('date')
+
+        target_date = None
+        if date_str:
+            from django.utils.dateparse import parse_date
+            target_date = parse_date(date_str)
+        if target_date is None and day is not None and month is not None and year is not None:
+            try:
+                target_date = datetime(int(year), int(month), int(day)).date()
+            except (ValueError, TypeError):
+                pass
+
+        if target_date is None:
+            return Response({
+                'error': 'Invalid or missing date. Provide query params: date (YYYY-MM-DD) or day, month, year.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         active_workout = Workout.objects.filter(
             user=request.user,
-            is_done=False
+            is_done=False,
+            datetime__date=target_date
         ).first()
 
         if active_workout:
             return Response({
                 'workout_performed': False,
-                'active_workout': True
+                'active_workout': True,
+                'date': target_date.isoformat(),
             }, status=status.HTTP_200_OK)
 
-        today = timezone.now().date()
+        day_workouts = Workout.objects.filter(
+            user=request.user,
+            datetime__date=target_date
+        ).order_by('-datetime')
 
+        if not day_workouts.exists():
+            return Response({
+                'workout_performed': False,
+                'date': target_date.isoformat(),
+                'message': f'No workout performed on {target_date.isoformat()}'
+            }, status=status.HTTP_200_OK)
+
+        completed_workout = day_workouts.filter(is_done=True).first()
+
+        if completed_workout:
+            if completed_workout.is_rest_day:
+                return Response({
+                    'workout_performed': True,
+                    'is_rest': True,
+                    'date': target_date.isoformat(),
+                }, status=status.HTTP_200_OK)
+            else:
+                workout_data = GetWorkoutSerializer(completed_workout).data
+                return Response({
+                    'workout_performed': True,
+                    'is_rest_day': False,
+                    'date': target_date.isoformat(),
+                    'workout': workout_data,
+                    'message': f'Workout performed on {target_date.isoformat()}'
+                }, status=status.HTTP_200_OK)
+
+        return Response({
+            'workout_performed': False,
+            'date': target_date.isoformat(),
+            'message': f'No workout performed on {target_date.isoformat()}'
+        }, status=status.HTTP_200_OK)
+
+
+class CheckWorkoutPerformedTodayView(ConditionalGetMixin, APIView):
+    """
+    GET /api/workout/check-today/?date=YYYY-MM-DD
+
+    Returns a single, consistent shape for "what's the state of today?":
+    - status: "none" | "active" | "rest_day" | "completed"
+    - date: today (or query date) ISO
+    - active_workout: full workout when status is "active", else null (so you don't need /api/workout/active/)
+    - completed_workout: full workout or rest-day summary when status is "rest_day" or "completed", else null
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        date_str = request.query_params.get('date')
+        if date_str:
+            from django.utils.dateparse import parse_date
+            today = parse_date(date_str) or timezone.now().date()
+        else:
+            today = timezone.now().date()
+
+        # 1. Any workout in progress (today or not) — treat as "active"
+        active_workout = Workout.objects.filter(
+            user=request.user,
+            is_done=False
+        ).select_related('user').prefetch_related(
+            'workoutexercise_set__exercise',
+            'workoutexercise_set__sets'
+        ).first()
+
+        if active_workout:
+            serializer = GetWorkoutSerializer(active_workout, context={'include_insights': True})
+            return Response({
+                'date': today.isoformat(),
+                'status': 'active',
+                'active_workout': serializer.data,
+                'completed_workout': None,
+            }, status=status.HTTP_200_OK)
+
+        # 2. What's on today's date?
         today_workouts = Workout.objects.filter(
             user=request.user,
             datetime__date=today
@@ -318,9 +445,10 @@ class CheckWorkoutPerformedTodayView(APIView):
 
         if not today_workouts.exists():
             return Response({
-                'workout_performed': False,
                 'date': today.isoformat(),
-                'message': 'No workout performed today'
+                'status': 'none',
+                'active_workout': None,
+                'completed_workout': None,
             }, status=status.HTTP_200_OK)
 
         completed_workout = today_workouts.filter(is_done=True).first()
@@ -328,28 +456,38 @@ class CheckWorkoutPerformedTodayView(APIView):
         if completed_workout:
             if completed_workout.is_rest_day:
                 return Response({
-                    'workout_performed': True,
-                    'is_rest': True
-                }, status=status.HTTP_200_OK)
-            else:
-                workout_data = GetWorkoutSerializer(completed_workout).data
-                return Response({
-                    'workout_performed': True,
-                    'is_rest_day': False,
                     'date': today.isoformat(),
-                    'workout': workout_data,
-                    'message': 'Workout performed today'
+                    'status': 'rest_day',
+                    'active_workout': None,
+                    'completed_workout': {
+                        'is_rest_day': True,
+                        'id': completed_workout.id,
+                        'datetime': completed_workout.datetime.isoformat() if completed_workout.datetime else None,
+                        'date': today.isoformat(),
+                    },
                 }, status=status.HTTP_200_OK)
+            workout_data = GetWorkoutSerializer(completed_workout).data
+            return Response({
+                'date': today.isoformat(),
+                'status': 'completed',
+                'active_workout': None,
+                'completed_workout': workout_data,
+            }, status=status.HTTP_200_OK)
 
+        # Has entries for today but none completed (edge case)
         return Response({
-            'workout_performed': False,
             'date': today.isoformat(),
-            'message': 'No workout performed today'
+            'status': 'none',
+            'active_workout': None,
+            'completed_workout': None,
         }, status=status.HTTP_200_OK)
 
 
-class TotalWorkoutsPerformedView(APIView):
+class TotalWorkoutsPerformedView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(user=request.user, is_done=True).aggregate(Max("updated_at"))["updated_at__max"]
 
     def get(self, request):
         total_workouts = Workout.objects.filter(user=request.user, is_done=True).count()

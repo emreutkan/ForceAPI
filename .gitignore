@@ -13,8 +13,14 @@ logs/
 *.pem
 utrack-key.pem
 datadump_clean.json
+
+# Markdown files
 *.md
-!README.md
+
+# Assets (media uploads, collected static files)
+media/
+staticfiles/
+assets/
 
 
 

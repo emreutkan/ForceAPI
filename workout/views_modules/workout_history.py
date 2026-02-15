@@ -7,9 +7,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
+from django.db.models import Max
 from datetime import datetime, timedelta
 from calendar import monthrange
 from exercise.models import Exercise
+from core.mixins import ConditionalGetMixin
 from ..models import Workout, WorkoutExercise, ExerciseSet
 from ..permissions import is_pro_user
 from ..utils import calculate_one_rep_max
@@ -21,9 +23,16 @@ class WorkoutPagination(PageNumberPagination):
     max_page_size = 100
 
 
-class GetExercise1RMHistoryView(APIView):
+class GetExercise1RMHistoryView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, exercise_id=None, **kwargs):
+        return WorkoutExercise.objects.filter(
+            exercise_id=exercise_id,
+            workout__user=request.user,
+            workout__is_done=True,
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request, exercise_id):
         """
         GET /api/workout/exercise/<exercise_id>/1rm-history/
@@ -70,9 +79,16 @@ class GetExercise1RMHistoryView(APIView):
         })
 
 
-class GetExerciseSetHistoryView(APIView):
+class GetExerciseSetHistoryView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, exercise_id=None, **kwargs):
+        return ExerciseSet.objects.filter(
+            workout_exercise__exercise_id=exercise_id,
+            workout_exercise__workout__user=request.user,
+            workout_exercise__workout__is_done=True,
+        ).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request, exercise_id):
         """
         GET /api/workout/exercise/<exercise_id>/set-history/
@@ -111,9 +127,17 @@ class GetExerciseSetHistoryView(APIView):
         return paginator.get_paginated_response(history)
 
 
-class GetExerciseLastWorkoutView(APIView):
+class GetExerciseLastWorkoutView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, exercise_id=None, **kwargs):
+        we = WorkoutExercise.objects.filter(
+            exercise_id=exercise_id,
+            workout__user=request.user,
+            workout__is_done=True,
+        ).order_by("-workout__datetime").values_list("updated_at", flat=True).first()
+        return we
+
     def get(self, request, exercise_id):
         """
         GET /api/workout/exercise/<exercise_id>/last-workout/
@@ -175,9 +199,12 @@ class GetExerciseLastWorkoutView(APIView):
         })
 
 
-class CalendarView(APIView):
+class CalendarView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/workout/calendar/
@@ -257,9 +284,12 @@ class CalendarView(APIView):
         })
 
 
-class GetAvailableYearsView(APIView):
+class GetAvailableYearsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/workout/years/
@@ -272,9 +302,12 @@ class GetAvailableYearsView(APIView):
         return Response({'years': list(years)})
 
 
-class CalendarStatsView(APIView):
+class CalendarStatsView(ConditionalGetMixin, APIView):
     permission_classes = [IsAuthenticated]
-    
+
+    def get_last_modified(self, request, **kwargs):
+        return Workout.objects.filter(user=request.user).aggregate(Max("updated_at"))["updated_at__max"]
+
     def get(self, request):
         """
         GET /api/workout/calendar/stats/
