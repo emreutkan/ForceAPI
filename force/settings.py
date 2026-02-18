@@ -51,51 +51,34 @@ if LOCALHOST == 'False':
         )
 
 
-APPLE_KEY_ID = env('APPLE_KEY_ID')
-APPLE_TEAM_ID = env('APPLE_TEAM_ID')
-APPLE_CLIENT_ID = env('APPLE_CLIENT_ID')
-APPLE_PRIVATE_KEY = env('APPLE_PRIVATE_KEY').replace('\\n', '\n') # Fixes newline issues in keys
 DEPLOY_HOST = env('DEPLOY_HOST', default='')
 POSTGRES_USER = env('POSTGRES_USER', default="")
 POSTGRES_PASSWORD = env('POSTGRES_PASSWORD', default="")
 POSTGRES_DB = env('POSTGRES_DB', default="")
-# Suppress specific warnings from dj_rest_auth regarding allauth deprecations
-warnings.filterwarnings('ignore', message='.*app_settings.USERNAME_REQUIRED is deprecated.*')
-warnings.filterwarnings('ignore', message='.*app_settings.EMAIL_REQUIRED is deprecated.*')
-
 # DB_HOST and DB_PORT are set conditionally based on LOCALHOST and DATABASE_URL
-# Initialize with defaults to avoid errors if not set in .env
 DB_HOST = env('DB_HOST', default='localhost')
 DB_PORT = env('DB_PORT', default='5432')
-# Build DATABASE_URL if not already set and we have the components
-if POSTGRES_USER and POSTGRES_PASSWORD and POSTGRES_DB:
-    # Check if DATABASE_URL is already set (from .env), if not, build it
-    try:
-        DATABASE_URL = env('DATABASE_URL')
-    except:
-        DATABASE_URL = f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
-else:
+try:
+    DATABASE_URL = env('DATABASE_URL')
+except Exception:
     DATABASE_URL = None
-
-if LOCALHOST == 'True' and not DATABASE_URL:
-    DEBUG = True
-    ALLOWED_HOSTS = ['*']
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
-elif LOCALHOST == 'True' and DATABASE_URL: # Localhost is True and DATABASE_URL is set WHICH MEANS WE ARE IN DOCKER COMPOSE
-    DEBUG = True
-    ALLOWED_HOSTS = ['*']
-    DB_HOST = 'db' # because we are in docker compose
-    DB_PORT = 5432 # because we are in docker compose
+if not DATABASE_URL and POSTGRES_USER and POSTGRES_PASSWORD and POSTGRES_DB:
     DATABASE_URL = f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
 
-    DATABASES = {
-        'default': env.db('DATABASE_URL')
-    }
+# Localhost: Postgres (Docker or local). DB_HOST in .env: use 'localhost' when Django runs on host, 'db' when in Docker.
+if LOCALHOST == 'True':
+    DEBUG = True
+    ALLOWED_HOSTS = ['*']
+    if not POSTGRES_USER or not POSTGRES_PASSWORD or not POSTGRES_DB:
+        raise ValueError(
+            "Local dev uses Postgres. Set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB in .env "
+            "and run Postgres (e.g. docker compose --profile postgres up -d db). Use DB_HOST=localhost when Django runs on host."
+        )
+    DB_HOST = env('DB_HOST', default='localhost')
+    DB_PORT = env('DB_PORT', default='5432')
+    DATABASE_URL = f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
+    os.environ['DATABASE_URL'] = DATABASE_URL
+    DATABASES = {'default': env.db('DATABASE_URL')}
 
 elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     DEBUG = False
@@ -133,7 +116,8 @@ elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal 
     X_FRAME_OPTIONS = 'DENY'  # Prevent clickjacking
     SESSION_COOKIE_SECURE = True  # Secure session cookies
     CSRF_COOKIE_SECURE = True  # Secure CSRF cookies
-    SESSION_COOKIE_HTTPONLY = True  # Prevent XSS on cookies 
+    CSRF_COOKIE_HTTPONLY = True  # Prevent JS access to CSRF cookie
+    SESSION_COOKIE_HTTPONLY = True  # Prevent XSS on cookies
 elif LOCALHOST == 'False' and not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set")
 else:
@@ -151,22 +135,11 @@ INSTALLED_APPS = [
     'corsheaders',
     'core',
     'rest_framework',
-    'rest_framework.authtoken',
     'user',
     'exercise',
     'workout',
-    'supplements',
     'body_measurements',
-    'django.contrib.sites',       # Required by allauth
-    'allauth',
-    'allauth.account',
-    'allauth.socialaccount',
-    'allauth.socialaccount.providers.google',
-    'allauth.socialaccount.providers.apple',
-    'dj_rest_auth',
-    'dj_rest_auth.registration',
-    'drf_spectacular',  # API documentation
-    
+    'drf_spectacular',
 ]
 
 
@@ -180,7 +153,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'allauth.account.middleware.AccountMiddleware', 
 ]
 
 ROOT_URLCONF = 'force.urls'
@@ -284,48 +256,9 @@ else:
 
 # CSRF Settings
 
-# Add Authentication Backends
-AUTHENTICATION_BACKENDS = [
-    'django.contrib.auth.backends.ModelBackend',
-    'allauth.account.auth_backends.AuthenticationBackend',
-]
-
-# Allauth Configuration (matches your CustomUser email-only setup)
-ACCOUNT_USER_MODEL_USERNAME_FIELD = None
-ACCOUNT_LOGIN_METHODS = {'email'}
-ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
-ACCOUNT_EMAIL_VERIFICATION = 'optional' # or 'mandatory'
-
-# Social Account Providers
-SOCIALACCOUNT_PROVIDERS = {
-    'google': {
-        'SCOPE': ['profile', 'email'],
-        'AUTH_PARAMS': {'access_type': 'online'},
-    },
-    'apple': {
-        'APP': {
-            # Your App ID (Bundle ID) from Apple Developer Console
-            'client_id': os.environ.get('APPLE_CLIENT_ID'),
-            
-            # The Key ID (from the .p8 file details in Apple Developer Console)
-            'secret': os.environ.get('APPLE_KEY_ID'),
-            
-            # Your Apple Team ID
-            'key': os.environ.get('APPLE_TEAM_ID'),
-            
-            # The contents of the .p8 private key file you downloaded from Apple
-            'certificate_key': os.environ.get('APPLE_PRIVATE_KEY')
-        }
-    }
-}
-
-# REST Framework Config (update existing)
+# REST Framework Config
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'dj_rest_auth.jwt_auth.JWTCookieAuthentication', # Optional, for cookie auth
-    ),
-    # Rate limiting/throttling configuration
+    'DEFAULT_AUTHENTICATION_CLASSES': [],
     'DEFAULT_THROTTLE_CLASSES': [
         'force.throttles.AnonBurstRateThrottle',
         'force.throttles.AnonSustainedRateThrottle',
@@ -333,44 +266,16 @@ REST_FRAMEWORK = {
         'force.throttles.SustainedRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        # Anonymous users
-        'anon_burst': '10/minute',      # 10 requests per minute for anonymous users
-        'anon_sustained': '100/hour',    # 100 requests per hour for anonymous users
-        
-        # Authenticated users (FREE)
-        'burst': '60/minute',            # 60 requests per minute
-        'sustained': '1000/hour',        # 1000 requests per hour
-        
-        # PRO users (higher limits)
-        'pro_user': '200/minute',        # 200 requests per minute for PRO users
-        
-        # Specific endpoints
-        'login': '5/minute',             # 5 login attempts per minute (prevent brute force)
-        'registration': '3/hour',        # 3 registrations per hour per IP
-        'password_reset': '3/hour',      # 3 password reset requests per hour
-        'check_date': '30/minute',       # check-date / check previous workout per user
+        'anon_burst': '10/minute',
+        'anon_sustained': '100/hour',
+        'burst': '60/minute',
+        'sustained': '1000/hour',
+        'pro_user': '200/minute',
+        'check_date': '30/minute',
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'force.exceptions.custom_exception_handler',
 }
-
-from datetime import timedelta
-
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
-}
-
-# Use JWTs with dj-rest-auth
-REST_AUTH = {
-    'USE_JWT': True,
-    'JWT_AUTH_HTTPONLY': False,
-}
-
-SITE_ID = 1
 
 # Logging Configuration
 LOGS_DIR = BASE_DIR / 'logs'

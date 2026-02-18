@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 try:
-    from utrack.throttles import CheckDateRateThrottle
+    from force.throttles import CheckDateRateThrottle
 except ImportError:
     from force.throttles import CheckDateRateThrottle
 from rest_framework.pagination import PageNumberPagination

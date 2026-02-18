@@ -8,6 +8,23 @@ from django.conf import settings
 import time
 from core.mixins import ConditionalGetMixin
 
+
+class ApiRootView(APIView):
+    """
+    GET /
+    Simple root response with API info and links to docs and health.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({
+            'name': 'ForceAPI',
+            'docs': request.build_absolute_uri('/api/docs/'),
+            'health': request.build_absolute_uri('/api/health/'),
+            'schema': request.build_absolute_uri('/api/schema/'),
+        }, status=status.HTTP_200_OK)
+
+
 class HealthCheckView(ConditionalGetMixin, APIView):
     """
     GET /api/health/

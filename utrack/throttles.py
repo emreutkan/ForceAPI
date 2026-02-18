@@ -41,20 +41,6 @@ class ProUserRateThrottle(UserRateThrottle):
     scope = 'pro_user'
 
 
-class LoginRateThrottle(AnonRateThrottle):
-    """
-    Strict rate limiting for login endpoints to prevent brute force attacks.
-    """
-    scope = 'login'
-
-
-class RegistrationRateThrottle(AnonRateThrottle):
-    """
-    Rate limiting for registration endpoints.
-    """
-    scope = 'registration'
-
-
 class CheckDateRateThrottle(UserRateThrottle):
     """
     Rate limiting for check-date / check previous workout endpoints.

@@ -64,7 +64,7 @@ class Command(BaseCommand):
             self.stdout.write("Signals restored.")
 
         self.stdout.write("Step 6: Resetting sequences...")
-        apps = ["user", "exercise", "workout", "supplements", "body_measurements"]
+        apps = ["user", "exercise", "workout", "body_measurements"]
         output = StringIO()
         try:
             call_command("sqlsequencereset", *apps, stdout=output)

@@ -18,7 +18,7 @@ from workout.models import Workout, WorkoutExercise, ExerciseSet
 
 
 # Credentials for App Store / TestFlight testing (document in App Store Connect sandbox testers)
-APP_STORE_TEST_EMAIL = "appstore.test@utrack.test"
+APP_STORE_TEST_EMAIL = "appstore.test@force.test"
 APP_STORE_TEST_PASSWORD = "TestUser123!"
 
 # Test data constants
