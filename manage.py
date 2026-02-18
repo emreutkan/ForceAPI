@@ -39,7 +39,7 @@ def _run_postgres_help():
     except Exception as e:
         sys.stderr.write(f"(Could not run docker: {e})\n")
     sys.stderr.write("\nCommands you may want to use:\n")
-    sys.stderr.write("  Start Postgres:  docker compose --profile postgres up -d db\n")
+    sys.stderr.write("  Start Postgres:  docker compose up -d db\n")
     sys.stderr.write("  Check status:   docker compose ps\n")
     sys.stderr.write("  View logs:      docker compose logs db -f\n")
 

@@ -4,7 +4,6 @@ services:
         networks:
             - force-network
         image: postgres:16 # postgres:16-alpine
-        profiles: ["postgres"]  # Only start when explicitly requested
         environment:
             POSTGRES_USER: ${POSTGRES_USER} # postgres user
             POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # postgres password
@@ -24,7 +23,6 @@ services:
     web:
         networks:
             - force-network
-        profiles: ["postgres"]  # Only start when explicitly requested
         build:
             context: . # context is the root directory of the project
             dockerfile: Dockerfile
@@ -54,7 +52,6 @@ services:
     nginx:
         networks:
             - force-network
-        profiles: ["postgres"]  # Only start when explicitly requested
         image: nginx:alpine
         ports:
             - "80:80"

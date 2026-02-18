@@ -11,7 +11,6 @@ venv/
 logs/
 *.log
 *.pem
-utrack-key.pem
 datadump_clean.json
 
 # Markdown files

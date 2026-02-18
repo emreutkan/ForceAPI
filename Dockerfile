@@ -27,4 +27,4 @@ EXPOSE 8000
 
 # again, this actually does nothing, but it's a good practice to have it, docker-compose will override this command with the one in the docker-compose.yml file
 # so if you ever run the container without Docker Compose, the app won't crash looking for the command.
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "utrack.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "force.wsgi:application"]

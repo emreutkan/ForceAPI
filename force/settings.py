@@ -72,7 +72,7 @@ if LOCALHOST == 'True':
     if not POSTGRES_USER or not POSTGRES_PASSWORD or not POSTGRES_DB:
         raise ValueError(
             "Local dev uses Postgres. Set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB in .env "
-            "and run Postgres (e.g. docker compose --profile postgres up -d db). Use DB_HOST=localhost when Django runs on host."
+            "and run Postgres (e.g. docker compose up -d db). Use DB_HOST=localhost when Django runs on host."
         )
     DB_HOST = env('DB_HOST', default='localhost')
     DB_PORT = env('DB_PORT', default='5432')
@@ -97,7 +97,7 @@ elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal 
     DATABASES = {
         'default': env.db('DATABASE_URL')
     }
-    CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['https://api.utrack.irfanemreutkan.com'])
+    CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['http://89.167.52.206'])
     
     # Production Security Settings
     # SECURE_SSL_REDIRECT: Set to False if SSL is terminated at load balancer/proxy
@@ -257,8 +257,12 @@ else:
 # CSRF Settings
 
 # REST Framework Config
+SUPABASE_JWT_SECRET = env('SUPABASE_JWT_SECRET')
+
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'user.authentication.SupabaseJWTAuthentication',
+    ],
     'DEFAULT_THROTTLE_CLASSES': [
         'force.throttles.AnonBurstRateThrottle',
         'force.throttles.AnonSustainedRateThrottle',

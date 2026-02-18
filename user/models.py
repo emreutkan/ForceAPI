@@ -54,6 +54,9 @@ class CustomUser(AbstractUser, TimestampedModel):
     # Developer accounts (e.g. bypass rate limiting)
     is_developer = models.BooleanField(default=False, help_text="Developer accounts bypass rate limiting")
 
+    # Supabase auth
+    supabase_uid = models.UUIDField(unique=True, null=True, blank=True, help_text="Supabase user UUID (sub claim in JWT)")
+
     USERNAME_FIELD = 'email'  ## this tells Django that the email field is used for authentication instead of the username field
     REQUIRED_FIELDS = []
     
