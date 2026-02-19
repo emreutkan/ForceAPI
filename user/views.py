@@ -1,8 +1,11 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.contrib.auth import get_user_model
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.utils import timezone
 from .serializers import UserSerializer
 from .models import UserProfile, WeightHistory
 from rest_framework.pagination import PageNumberPagination
@@ -427,3 +430,74 @@ class DataImportView(APIView):
                                 )
 
         return Response({'message': 'Data imported successfully'}, status=status.HTTP_201_CREATED)
+
+
+# --- RevenueCat webhook (no auth; verified via Authorization header from dashboard) ---
+
+PRO_GRANT_EVENTS = {
+    'INITIAL_PURCHASE',
+    'RENEWAL',
+    'UNCANCELLATION',
+    'SUBSCRIPTION_EXTENDED',
+    'TEMPORARY_ENTITLEMENT_GRANT',
+}
+PRO_REVOKE_EVENTS = {'EXPIRATION', 'CANCELLATION'}
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RevenueCatWebhookView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        auth_header = request.headers.get('Authorization') or ''
+        expected = getattr(settings, 'REVENUECAT_WEBHOOK_AUTHORIZATION', '') or ''
+        if expected and auth_header.strip() != expected.strip():
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            body = request.body.decode('utf-8') if isinstance(request.body, bytes) else request.body
+            data = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return Response({'error': 'Invalid JSON'}, status=status.HTTP_400_BAD_REQUEST)
+
+        event = data.get('event') or {}
+        event_type = event.get('type') or ''
+        if event_type not in PRO_GRANT_EVENTS and event_type not in PRO_REVOKE_EVENTS:
+            return Response({'received': True}, status=status.HTTP_200_OK)
+
+        app_user_id = event.get('app_user_id')
+        if not app_user_id and event_type == 'TRANSFER':
+            aliases = event.get('aliases') or []
+            app_user_id = aliases[0] if aliases else None
+        if not app_user_id:
+            return Response({'received': True}, status=status.HTTP_200_OK)
+
+        try:
+            user = User.objects.get(supabase_uid=app_user_id)
+        except User.DoesNotExist:
+            return Response({'received': True}, status=status.HTTP_200_OK)
+
+        expiration_ms = event.get('expiration_at_ms')
+        pro_until = None
+        if expiration_ms is not None:
+            try:
+                pro_until = timezone.datetime.fromtimestamp(int(expiration_ms) / 1000.0, tz=timezone.utc)
+            except (ValueError, TypeError, OSError):
+                pass
+
+        transaction_id = event.get('original_transaction_id') or event.get('transaction_id') or ''
+
+        if event_type in PRO_GRANT_EVENTS:
+            user.is_pro = True
+            user.pro_until = pro_until
+            if transaction_id:
+                user.subscription_id = str(transaction_id)[:255]
+            user.save(update_fields=['is_pro', 'pro_until', 'subscription_id', 'updated_at'])
+        elif event_type in PRO_REVOKE_EVENTS:
+            user.is_pro = False
+            if pro_until is not None:
+                user.pro_until = pro_until
+            user.save(update_fields=['is_pro', 'pro_until', 'updated_at'])
+
+        return Response({'received': True}, status=status.HTTP_200_OK)

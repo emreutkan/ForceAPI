@@ -4,11 +4,13 @@ from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from core.views import HealthCheckView, ApiRootView
+from user.views import RevenueCatWebhookView
 
 urlpatterns = [
     path('', ApiRootView.as_view(), name='api-root'),
     path('admin/', admin.site.urls),
     path('api/health/', HealthCheckView.as_view(), name='health-check'),
+    path('api/webhooks/revenuecat/', RevenueCatWebhookView.as_view(), name='revenuecat-webhook'),
     path('api/user/', include('user.urls')),
     path('api/workout/', include('workout.urls')),
     path('api/exercise/', include('exercise.urls')),

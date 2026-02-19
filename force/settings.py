@@ -205,6 +205,9 @@ SUPABASE_JWT_SECRET = env('SUPABASE_JWT_SECRET', default='')
 SUPABASE_URL = env('SUPABASE_URL', default='')
 SUPABASE_ANON_KEY = env('SUPABASE_ANON_KEY', default='')
 
+# RevenueCat webhook: set in dashboard and in .env; if set, incoming webhook must send same value in Authorization header
+REVENUECAT_WEBHOOK_AUTHORIZATION = env('REVENUECAT_WEBHOOK_AUTHORIZATION', default='')
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'user.authentication.SupabaseJWTAuthentication',
