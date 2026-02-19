@@ -8,6 +8,7 @@ venv/
 .idea/
 .vscode/
 .claude/
+.cursor/
 logs/
 *.log
 *.pem

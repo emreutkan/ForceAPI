@@ -4,9 +4,7 @@ import environ
 from pathlib import Path
 
 # Initialize environ
-env = environ.Env(
-  
-)
+env = environ.Env()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,99 +13,36 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
 
 SECRET_KEY = env('SECRET_KEY')
-LOCALHOST = env('LOCALHOST')  # Read early for Sentry initialization
+# Single switch: True = local/dev (Docker or host; access at localhost or your LAN IP), False = production (VPS / ALLOWED_HOSTS)
+IS_LOCAL = env.bool('LOCALHOST', default=True)
 
-# Sentry error tracking (optional) - initialize early
-SENTRY_DSN = os.environ.get('SENTRY_DSN')
-if SENTRY_DSN and LOCALHOST == 'False':
-    import sentry_sdk
-    from sentry_sdk.integrations.django import DjangoIntegration
-    from sentry_sdk.integrations.logging import LoggingIntegration
-    
-    sentry_sdk.init(
-        dsn=SENTRY_DSN,
-        integrations=[
-            DjangoIntegration(
-                transaction_style='url',
-                middleware_spans=True,
-                signals_spans=True,
-            ),
-            LoggingIntegration(
-                level=None,  # Capture all logs
-                event_level=None,  # Send all events
-            ),
-        ],
-        traces_sample_rate=0.1,  # 10% of transactions
-        send_default_pii=False,  # Don't send personally identifiable information
-        environment='production',
-    )
-
-# Validate SECRET_KEY in production
-if LOCALHOST == 'False':
-    if not SECRET_KEY or SECRET_KEY == 'your-secret-key-here' or len(SECRET_KEY) < 50:
-        raise ValueError(
-            "SECRET_KEY must be set to a secure random value in production. "
-            "Generate one using: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
-        )
+DATABASE_URL = env('DATABASE_URL')
 
 
-DEPLOY_HOST = env('DEPLOY_HOST', default='')
-POSTGRES_USER = env('POSTGRES_USER', default="")
-POSTGRES_PASSWORD = env('POSTGRES_PASSWORD', default="")
-POSTGRES_DB = env('POSTGRES_DB', default="")
-# DB_HOST and DB_PORT are set conditionally based on LOCALHOST and DATABASE_URL
-DB_HOST = env('DB_HOST', default='localhost')
-DB_PORT = env('DB_PORT', default='5432')
-try:
-    DATABASE_URL = env('DATABASE_URL')
-except Exception:
-    DATABASE_URL = None
-if not DATABASE_URL and POSTGRES_USER and POSTGRES_PASSWORD and POSTGRES_DB:
-    DATABASE_URL = f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
-
-# Localhost: Postgres (Docker or local). DB_HOST in .env: use 'localhost' when Django runs on host, 'db' when in Docker.
-if LOCALHOST == 'True':
+if IS_LOCAL:
     DEBUG = True
     ALLOWED_HOSTS = ['*']
-    if not POSTGRES_USER or not POSTGRES_PASSWORD or not POSTGRES_DB:
-        raise ValueError(
-            "Local dev uses Postgres. Set POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB in .env "
-            "and run Postgres (e.g. docker compose up -d db). Use DB_HOST=localhost when Django runs on host."
-        )
-    DB_HOST = env('DB_HOST', default='localhost')
-    DB_PORT = env('DB_PORT', default='5432')
-    DATABASE_URL = f"postgres://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{DB_HOST}:{DB_PORT}/{POSTGRES_DB}"
-    os.environ['DATABASE_URL'] = DATABASE_URL
     DATABASES = {'default': env.db('DATABASE_URL')}
 
-elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal (OCI)
+elif not IS_LOCAL and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     DEBUG = False
-    ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
-    
-    # Validate production environment variables
-    if not ALLOWED_HOSTS:
-        raise ValueError("ALLOWED_HOSTS must be set in production. Set it in your .env file as a comma-separated list.")
-    
-    if 'db:5432' in DATABASE_URL:
-        DB_HOST = 'db'
-        DB_PORT = 5432
-    else:
-        DB_HOST = env('DB_HOST', default='localhost')
-        DB_PORT = env('DB_PORT', default='5432')
+    # VPS IP hardcoded; override via ALLOWED_HOSTS in .env if needed
+    ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['89.167.52.206'])
+
     DATABASES = {
         'default': env.db('DATABASE_URL')
     }
     CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['http://89.167.52.206'])
-    
+
     # Production Security Settings
     # SECURE_SSL_REDIRECT: Set to False if SSL is terminated at load balancer/proxy
     # Set to True if Django handles SSL directly
     SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=False)
-    
+
     # If SSL is terminated externally, trust the X-Forwarded-Proto header
     if not SECURE_SSL_REDIRECT:
         SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    
+
     SECURE_HSTS_SECONDS = 31536000  # 1 year - HTTP Strict Transport Security
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
@@ -118,10 +53,10 @@ elif LOCALHOST == 'False' and DATABASE_URL:  # Production: Docker or bare metal 
     CSRF_COOKIE_SECURE = True  # Secure CSRF cookies
     CSRF_COOKIE_HTTPONLY = True  # Prevent JS access to CSRF cookie
     SESSION_COOKIE_HTTPONLY = True  # Prevent XSS on cookies
-elif LOCALHOST == 'False' and not DATABASE_URL:
+elif not IS_LOCAL and not DATABASE_URL:
     raise ValueError("DATABASE_URL is not set")
 else:
-    raise ValueError("LOCALHOST is not set", LOCALHOST, DATABASE_URL)
+    raise ValueError("LOCALHOST must be True or False (or set IS_LOCAL via env)", DATABASE_URL)
 
 AUTH_USER_MODEL = 'user.CustomUser'
 
@@ -193,7 +128,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
-# Internationalization          
+# Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
 LANGUAGE_CODE = 'en-us'
@@ -217,7 +152,7 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 # Email Configuration
 # Use console backend for development, SMTP for production
-if LOCALHOST == 'True':
+if IS_LOCAL:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -227,7 +162,7 @@ else:
     EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
     EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
     DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
-    
+
     # Validate email settings in production
     if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
         warnings.warn(
@@ -245,7 +180,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # CORS Settings
 # For mobile apps, CORS is less critical but should still be configured
-if LOCALHOST == 'True':
+if IS_LOCAL:
     CORS_ALLOW_ALL_ORIGINS = True  # Development: allow all origins
     CORS_ALLOW_CREDENTIALS = True
 else:
@@ -257,7 +192,9 @@ else:
 # CSRF Settings
 
 # REST Framework Config
-SUPABASE_JWT_SECRET = env('SUPABASE_JWT_SECRET')
+SUPABASE_JWT_SECRET = env('SUPABASE_JWT_SECRET', default='')
+SUPABASE_URL = env('SUPABASE_URL', default='')
+SUPABASE_ANON_KEY = env('SUPABASE_ANON_KEY', default='')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

@@ -5,9 +5,9 @@ services:
             - force-network
         image: postgres:16 # postgres:16-alpine
         environment:
-            POSTGRES_USER: ${POSTGRES_USER} # postgres user
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # postgres password
-            POSTGRES_DB: ${POSTGRES_DB} # postgres database name
+            POSTGRES_USER: ${POSTGRES_USER:-force}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB:-force_db}
         volumes:
             - db_data:/var/lib/postgresql/data # postgres data volume 
         ports:
@@ -31,14 +31,13 @@ services:
             - ./staticfiles:/app/staticfiles
             - ./media:/app/media
             - ./logs:/app/logs
-        # Remove port mapping - nginx will handle external access
-        # ports:
-        #     - "8000:8000"
+        ports:
+            - "8000:8000"
         env_file:
             - .env
         environment:
-            DATABASE_URL: ${DATABASE_URL} # database url: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-            LOCALHOST: ${LOCALHOST} # localhost: true or false
+            DATABASE_URL: ${DATABASE_URL}
+            LOCALHOST: ${LOCALHOST}
         healthcheck:
             test: ["CMD", "python", "-c", "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 8000))"]
             interval: 10s
@@ -50,6 +49,8 @@ services:
                 condition: service_healthy # check if db service is healthy
 
     nginx:
+        profiles:
+            - with-nginx
         networks:
             - force-network
         image: nginx:alpine
