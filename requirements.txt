@@ -17,5 +17,6 @@ sqlparse==0.5.5
 tzdata==2025.3
 urllib3==2.6.2
 gunicorn==23.0.0
+whitenoise==6.8.2
 psycopg2-binary==2.9.11
 sentry-sdk==2.19.0
