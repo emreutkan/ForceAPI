@@ -59,6 +59,7 @@ from .workout_recovery import (
 from .workout_analytics import (
     VolumeAnalysisView,
     WorkoutSummaryView,
+    UserStatsView,
 )
 
 # Re-export everything
@@ -105,6 +106,7 @@ __all__ = [
     # Analytics
     'VolumeAnalysisView',
     'WorkoutSummaryView',
+    'UserStatsView',
     # Pagination
     'WorkoutPagination',
 ]

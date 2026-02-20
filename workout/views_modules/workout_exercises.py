@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.db import transaction
+from django.db.models import Max
 from exercise.models import Exercise
 from ..models import Workout, WorkoutExercise, ExerciseSet
 from ..serializers import WorkoutExerciseSerializer, ExerciseSetSerializer
@@ -15,11 +17,6 @@ class AddExerciseToWorkoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, workout_id):
-        try:
-            workout = Workout.objects.get(id=workout_id, user=request.user)
-        except Workout.DoesNotExist:
-            return Response({'error': 'Workout not found'}, status=status.HTTP_404_NOT_FOUND)
-
         exercise_id = request.data.get('exercise_id')
         if not exercise_id:
             return Response({'error': 'exercise_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -29,48 +26,56 @@ class AddExerciseToWorkoutView(APIView):
         except Exercise.DoesNotExist:
             return Response({'error': 'Exercise not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        current_count = workout.workoutexercise_set.count()
-        
-        data = {
-            'workout': workout.id,
-            'exercise': exercise.id,
-            'order': current_count + 1
-        }
-        
-        serializer = WorkoutExerciseSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            try:
+                workout = Workout.objects.select_for_update().get(id=workout_id, user=request.user)
+            except Workout.DoesNotExist:
+                return Response({'error': 'Workout not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            max_order = workout.workoutexercise_set.aggregate(m=Max('order'))['m'] or 0
+            data = {
+                'workout': workout.id,
+                'exercise': exercise.id,
+                'order': max_order + 1
+            }
+            serializer = WorkoutExerciseSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class AddExerciseSetToWorkoutExerciseView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, workout_exercise_id):
-        try:
-            workout_exercise = WorkoutExercise.objects.get(id=workout_exercise_id, workout__user=request.user)
-        except WorkoutExercise.DoesNotExist:
-            return Response({'error': 'Workout exercise not found'}, status=status.HTTP_404_NOT_FOUND)
+        with transaction.atomic():
+            try:
+                workout_exercise = WorkoutExercise.objects.select_for_update().get(
+                    id=workout_exercise_id, workout__user=request.user
+                )
+            except WorkoutExercise.DoesNotExist:
+                return Response({'error': 'Workout exercise not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        current_sets = workout_exercise.sets.count()
-        set_number = current_sets + 1
+            # Use Max instead of count so deleted sets don't cause duplicate set_numbers
+            max_set = workout_exercise.sets.aggregate(m=Max('set_number'))['m'] or 0
+            set_number = max_set + 1
 
-        data = request.data.copy()
-        data['workout_exercise'] = workout_exercise.id
-        data['set_number'] = set_number
-        
-        serializer = ExerciseSetSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save()
-            
-            workout = workout_exercise.workout
-            if workout.rest_timer_paused_at:
-                workout.rest_timer_paused_at = None
-                workout.save(update_fields=['rest_timer_paused_at'])
-            recalculate_workout_metrics(workout)
-            
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            data = request.data.copy()
+            data['workout_exercise'] = workout_exercise.id
+            data['set_number'] = set_number
+
+            serializer = ExerciseSetSerializer(data=data)
+            if serializer.is_valid():
+                serializer.save()
+
+                workout = workout_exercise.workout
+                if workout.rest_timer_paused_at:
+                    workout.rest_timer_paused_at = None
+                    workout.save(update_fields=['rest_timer_paused_at'])
+                recalculate_workout_metrics(workout)
+
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

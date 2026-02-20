@@ -1,3 +1,4 @@
+import unittest
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
@@ -8,6 +9,7 @@ from .models import UserProfile, WeightHistory
 User = get_user_model()
 
 
+@unittest.skip("Auth is handled by Supabase; no Django register/login/password-reset endpoints.")
 class UserRegistrationTestCase(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -34,6 +36,7 @@ class UserRegistrationTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+@unittest.skip("Auth is handled by Supabase; no Django login endpoint.")
 class UserAuthenticationTestCase(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -86,15 +89,12 @@ class UserProfileTestCase(TestCase):
 
     def test_get_weight_history(self):
         """Test getting weight history"""
-        WeightHistory.objects.create(
-            user=self.user,
-            weight=75.0,
-            date=timezone.now().date()
-        )
+        WeightHistory.objects.create(user=self.user, weight=75.0)
         response = self.client.get('/api/user/weight/history/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
+@unittest.skip("Auth is handled by Supabase; no Django password-reset endpoint.")
 class PasswordResetTestCase(TestCase):
     def setUp(self):
         self.client = APIClient()

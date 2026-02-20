@@ -12,7 +12,7 @@ from rest_framework.exceptions import AuthenticationFailed
 User = get_user_model()
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=10)
 def _fetch_jwks(supabase_url: str, anon_key: str) -> tuple:
     """Fetch and cache JWKS keys from Supabase. Returns a tuple (hashable for lru_cache)."""
     jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"

@@ -48,6 +48,7 @@ from .views_modules import (
     # Analytics
     VolumeAnalysisView,
     WorkoutSummaryView,
+    UserStatsView,
 )
 
 # Re-export everything for backward compatibility
@@ -88,5 +89,6 @@ __all__ = [
     'GetMuscleRecoveryStatusView',
     'VolumeAnalysisView',
     'WorkoutSummaryView',
+    'UserStatsView',
 ]
     

@@ -369,96 +369,92 @@ class Workout(TimestampedModel):
     def calculate_cns_load(self):
         """
         Calculate Central Nervous System (CNS) load for this workout.
-        CNS fatigue is driven by Axial Loading (weight on spine) and Absolute Intensity (% of 1RM),
-        not just metabolic fatigue. This is calculated per session, not per muscle.
-        
-        Formula:
-        - Each exercise has a CNS coefficient based on type and axial loading
-        - RPE is calculated from RIR: RPE = 10 - RIR
-        - RPE impact is non-linear (exponential): RPE^2 / 10.0
-        - CNS Load = sum of (RPE_factor * CNS_coefficient) for all sets
-        
+        CNS fatigue is driven by three factors:
+        - Exercise type / axial loading (CNS coefficient per exercise)
+        - Relative intensity (RPE, exponential: RPE² / 10)
+        - Absolute load (weight, square-root normalised to 60 kg reference)
+
+        Formula per working set:
+          contribution = cns_coefficient × (rpe² / 10) × sqrt(weight_kg / 60)
+
+        The weight factor means two athletes doing the same exercise at the same
+        RIR but different weights will correctly get different CNS scores.
+        Sets with no weight logged (weight=0) are skipped — bodyweight exercises
+        without a logged load produce no measurable axial CNS stress.
+
         Interpretation:
-        - < 150: Low CNS impact (Recovery: ~24h)
-        - 150-300: Moderate CNS impact (Recovery: ~48h)
-        - > 300: High CNS impact (Recovery: ~72h+)
+        - < 150:  Low CNS impact (~24 h recovery)
+        - 150–300: Moderate CNS impact (~48 h recovery)
+        - 300–500: High CNS impact (~72 h recovery)
+        - > 500:  Extreme CNS impact (~96 h recovery)
         """
-        # CNS Coefficient mapping based on exercise type and axial loading
-        # Tier S (1.5-2.0): High axial load, heavy systemic stress
-        # Tier A (1.2-1.4): Moderate axial load, compound movements
-        # Tier B (1.0): Standard compound movements
-        # Tier C (0.5): Isolation movements
-        
-        # Map exercise names to CNS coefficients (case-insensitive)
         cns_coefficients_map = {
-            # Tier S - Highest CNS cost
+            # Tier S — maximum axial load and systemic stress
             'deadlift': 2.0,
             'squat': 1.8,
             'rack pull': 1.8,
             'trap bar deadlift': 1.7,
             'sumo deadlift': 1.7,
-            
-            # Tier A - High CNS cost
-            'bench press': 1.3,
+
+            # Tier A — high axial load
+            'front squat': 1.5,
+            'overhead squat': 1.5,  # technical demand ≈ front squat; typically done lighter
             'overhead press': 1.4,
+            'bench press': 1.3,
             'barbell row': 1.3,
             'pendlay row': 1.3,
             'leg press': 1.2,
-            'front squat': 1.5,
-            'overhead squat': 1.6,
-            
-            # Tier B - Standard compounds (default 1.0)
-            # These will use category-based default
-            
-            # Tier C - Isolation (low CNS cost)
-            # These will use category-based default
         }
-        
+
         cns_load = 0.0
-        workout_exercises = WorkoutExercise.objects.filter(workout=self).select_related('exercise').prefetch_related('sets')
-        
+        workout_exercises = (
+            WorkoutExercise.objects
+            .filter(workout=self)
+            .select_related('exercise')
+            .prefetch_related('sets')
+        )
+
         for workout_exercise in workout_exercises:
             exercise = workout_exercise.exercise
             sets = workout_exercise.sets.all()
-            
-            # Skip if no sets
+
             if not sets.exists():
                 continue
-            
-            # Get CNS coefficient for this exercise
+
             exercise_name_lower = exercise.name.lower()
-            cns_coefficient = cns_coefficients_map.get(exercise_name_lower, None)
-            
-            # If not in map, use category-based default
+            cns_coefficient = cns_coefficients_map.get(exercise_name_lower)
+
             if cns_coefficient is None:
                 if exercise.category == 'compound':
-                    # Check if it's a heavy compound (barbell-based)
-                    if exercise.equipment_type in ['barbell', 'ez_bar']:
-                        cns_coefficient = 1.2  # Tier A
-                    else:
-                        cns_coefficient = 1.0  # Tier B
+                    cns_coefficient = 1.2 if exercise.equipment_type in ['barbell', 'ez_bar'] else 1.0
                 elif exercise.category == 'isolation':
-                    cns_coefficient = 0.5  # Tier C
+                    cns_coefficient = 0.5
                 else:
-                    cns_coefficient = 0.3  # Cardio/stability - minimal CNS cost
-            
-            # Calculate CNS load from all sets
+                    cns_coefficient = 0.3  # cardio / stability
+
             for exercise_set in sets:
-                # Skip warmup sets
                 if exercise_set.is_warmup:
                     continue
-                
-                # Calculate RPE from RIR: RPE = 10 - RIR
-                rir = exercise_set.reps_in_reserve if exercise_set.reps_in_reserve is not None else 0
-                rpe = max(1.0, min(10.0, 10.0 - rir))  # Clamp between 1-10
-                
-                # RPE impact is non-linear (exponential curve)
-                # RPE 10 -> 100 points, RPE 9 -> 81 points, RPE 8 -> 64 points
+
+                weight_kg = float(exercise_set.weight)
+                if weight_kg <= 0:
+                    # No load logged — skip, cannot estimate axial CNS stress
+                    continue
+
+                # RPE from RIR. reps_in_reserve defaults to 0 in the DB when not
+                # explicitly logged, which is treated as max effort (taken to failure).
+                rir = exercise_set.reps_in_reserve
+                rpe = max(1.0, min(10.0, 10.0 - rir))
+
+                # Intensity factor (exponential: RPE 10 → 10.0, RPE 8 → 6.4, RPE 6 → 3.6)
                 rpe_factor = (rpe ** 2) / 10.0
-                
-                # Add to total CNS load
-                cns_load += (rpe_factor * cns_coefficient)
-        
+
+                # Absolute-load factor: sqrt curve normalised to 60 kg
+                # 60 kg → 1.0  |  15 kg → 0.50  |  240 kg → 2.00  (clamped [0.2, 3.0])
+                weight_factor = min(max((weight_kg / 60.0) ** 0.5, 0.2), 3.0)
+
+                cns_load += cns_coefficient * rpe_factor * weight_factor
+
         return round(cns_load, 2)
 
     def calculate_cns_recovery(self):

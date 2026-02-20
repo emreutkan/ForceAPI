@@ -18,6 +18,8 @@ from django.http import HttpResponse
 from django.conf import settings
 import logging
 from django.db import transaction
+
+logger = logging.getLogger(__name__)
 from django.db.models import Max
 from core.mixins import ConditionalGetMixin
 from workout.models import Workout, WorkoutExercise, ExerciseSet, TemplateWorkout, TemplateWorkoutExercise
@@ -134,21 +136,22 @@ class GetWeightHistoryView(ConditionalGetMixin, APIView):
         weight_history = WeightHistory.objects.filter(user=request.user).order_by('-created_at')
         page = paginator.paginate_queryset(weight_history, request)
 
+        # Batch-fetch body measurements for all dates in this page (avoids N+1)
+        page_dates = {entry.created_at.date() for entry in page}
+        body_fat_by_date = {}
+        for bm in BodyMeasurement.objects.filter(user=request.user, created_at__date__in=page_dates):
+            d = bm.created_at.date()
+            if d not in body_fat_by_date and bm.body_fat_percentage:
+                body_fat_by_date[d] = float(bm.body_fat_percentage)
+
         results = []
         for entry in page:
             entry_date = entry.created_at.date()
-            body_fat = None
-            body_measurement = BodyMeasurement.objects.filter(
-                user=request.user,
-                created_at__date=entry_date
-            ).first()
-            if body_measurement and body_measurement.body_fat_percentage:
-                body_fat = float(body_measurement.body_fat_percentage)
             results.append({
                 'id': entry.id,
                 'date': entry.created_at.isoformat(),
                 'weight': float(entry.weight),
-                'bodyfat': body_fat
+                'bodyfat': body_fat_by_date.get(entry_date)
             })
 
         return paginator.get_paginated_response(results)
@@ -316,15 +319,38 @@ class DataExportView(ConditionalGetMixin, APIView):
 class DataImportView(APIView):
     permission_classes = [IsAuthenticated]
 
+    # Hard limits to prevent DoS through large imports
+    _IMPORT_LIMITS = {
+        'weight_history': 5000,
+        'body_measurements': 1000,
+        'workouts': 500,
+        'template_workouts': 100,
+    }
+
     def post(self, request):
         if 'file' not in request.FILES:
             return Response({'error': 'No file uploaded'}, status=status.HTTP_400_BAD_REQUEST)
 
         import_file = request.FILES['file']
+        # Reject files larger than 10 MB
+        if import_file.size > 10 * 1024 * 1024:
+            return Response({'error': 'File too large (max 10 MB)'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             data = json.load(import_file)
         except json.JSONDecodeError:
             return Response({'error': 'Invalid JSON file'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not isinstance(data, dict):
+            return Response({'error': 'Invalid import format'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Enforce per-section limits
+        for section, limit in self._IMPORT_LIMITS.items():
+            if section in data and isinstance(data[section], list) and len(data[section]) > limit:
+                return Response(
+                    {'error': f'Too many {section} entries (max {limit})'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         user = request.user
 
@@ -354,6 +380,12 @@ class DataImportView(APIView):
 
             if 'weight_history' in data:
                 for entry in data['weight_history']:
+                    try:
+                        w = float(entry['weight'])
+                        if w <= 0 or w > 700:
+                            continue
+                    except (TypeError, ValueError, KeyError):
+                        continue
                     WeightHistory.objects.get_or_create(
                         user=user,
                         weight=entry['weight'],
@@ -452,7 +484,10 @@ class RevenueCatWebhookView(APIView):
     def post(self, request):
         auth_header = request.headers.get('Authorization') or ''
         expected = getattr(settings, 'REVENUECAT_WEBHOOK_AUTHORIZATION', '') or ''
-        if expected and auth_header.strip() != expected.strip():
+        if not expected:
+            logger.error('REVENUECAT_WEBHOOK_AUTHORIZATION is not configured — rejecting webhook')
+            return Response({'error': 'Webhook not configured'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        if auth_header.strip() != expected.strip():
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:

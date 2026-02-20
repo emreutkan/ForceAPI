@@ -9,6 +9,7 @@ from decimal import Decimal
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand
+from django.db import connection
 from django.utils import timezone
 
 from user.models import CustomUser, UserProfile, WeightHistory
@@ -139,7 +140,17 @@ class Command(BaseCommand):
                 created_at=dt,
             )
 
+    def _reset_workout_sequences(self):
+        """Ensure workout-related sequences are above max(id) to avoid PK conflicts after imports."""
+        with connection.cursor() as cursor:
+            for table in ["workout_workout", "workout_workoutexercise", "workout_exerciseset"]:
+                cursor.execute(
+                    "SELECT setval(pg_get_serial_sequence(%s, 'id'), COALESCE(MAX(id), 0) + 1, false) FROM " + table,
+                    [table],
+                )
+
     def _add_sample_workouts(self, user):
+        self._reset_workout_sequences()
         exercises = list(Exercise.objects.filter(is_active=True)[:20])
         if not exercises:
             self.stdout.write(self.style.WARNING("No exercises in DB; skipping workouts. Run populate_exercises first."))

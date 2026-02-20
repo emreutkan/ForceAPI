@@ -26,13 +26,22 @@ if IS_LOCAL:
 
 elif not IS_LOCAL and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     DEBUG = False
-    # VPS IP hardcoded; override via ALLOWED_HOSTS in .env if needed
-    ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['89.167.52.206'])
+    # VPS IP hardcoded; override via ALLOWED_HOSTS in .env (comma-separated; spaces are stripped)
+    # When client sends Host: 192.168.1.2:8000, Django requires that exact value in ALLOWED_HOSTS
+    _allowed = [h.strip() for h in env.list('ALLOWED_HOSTS', default=['89.167.52.206']) if h.strip()]
+    _with_ports = set(_allowed)
+    for h in _allowed:
+        if ':' not in h:
+            _with_ports.add(f"{h}:8000")   # runserver / dev
+            _with_ports.add(f"{h}:80")
+            _with_ports.add(f"{h}:443")
+    ALLOWED_HOSTS = list(_with_ports)
 
     DATABASES = {
         'default': env.db('DATABASE_URL')
     }
-    CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=['http://89.167.52.206'])
+    _origins = env.list('CSRF_TRUSTED_ORIGINS', default=['http://89.167.52.206'])
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _origins if o.strip()]
 
     # Production Security Settings
     # SECURE_SSL_REDIRECT: Set to False if SSL is terminated at load balancer/proxy
