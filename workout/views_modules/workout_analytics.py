@@ -8,12 +8,58 @@ from rest_framework import status
 from django.utils import timezone
 from django.db.models import Max, Sum, Avg, ExpressionWrapper, F, FloatField
 from django.db.models.functions import Cast
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type
 from collections import defaultdict
 from exercise.models import Exercise
 from core.mixins import ConditionalGetMixin
 from ..models import Workout, WorkoutExercise, WorkoutMuscleRecovery, ExerciseSet
-from ..permissions import is_pro_user
+from ..permissions import is_pro_user, get_pro_response
+
+
+# --- Science-Based Volume Targets (Schoenfeld / Israetel MEV–MAV–MRV) ---
+# Values: (min_sets_per_week, max_sets_per_week) for hypertrophy
+WEEKLY_SET_TARGETS = {
+    'chest':      (10, 20),
+    'shoulders':  (16, 22),
+    'biceps':     (14, 20),
+    'triceps':    (10, 14),
+    'forearms':   (10, 14),
+    'lats':       (10, 20),
+    'traps':      (12, 20),
+    'lower_back': (6,  10),
+    'quads':      (12, 20),
+    'hamstrings': (10, 16),
+    'glutes':     (4,  12),
+    'calves':     (8,  16),
+    'abs':        (16, 20),
+    'obliques':   (0,  16),
+    'abductors':  (0,  16),
+    'adductors':  (0,  16),
+}
+
+# --- Antagonist Pair Definitions ---
+# (muscle_a, muscle_b, max_imbalance_ratio, label)
+ANTAGONIST_PAIRS = [
+    ('chest',     'lats',       1.5,  'Push/Pull (Chest vs Lats)'),
+    ('quads',     'hamstrings', 1.4,  'Knee (Quads vs Hamstrings)'),
+    ('biceps',    'triceps',    1.5,  'Elbow (Biceps vs Triceps)'),
+    ('shoulders', 'traps',      2.0,  'Shoulder (Anterior vs Posterior)'),
+]
+
+
+def _linear_regression(x_values, y_values):
+    """Ordinary least squares slope and intercept. Returns (None, None) if < 2 points."""
+    n = len(x_values)
+    if n < 2:
+        return None, None
+    x_mean = sum(x_values) / n
+    y_mean = sum(y_values) / n
+    numerator   = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, y_values))
+    denominator = sum((x - x_mean) ** 2 for x in x_values)
+    if denominator == 0:
+        return 0.0, y_mean
+    slope = numerator / denominator
+    return slope, y_mean - slope * x_mean
 
 
 class VolumeAnalysisView(ConditionalGetMixin, APIView):
@@ -162,33 +208,142 @@ class VolumeAnalysisView(ConditionalGetMixin, APIView):
                     total_workouts += mg_data['workouts']
             
             if volumes:
+                active_weeks = len(volumes)
+                avg_sets_per_week = round(total_sets / active_weeks, 1)
+                target = WEEKLY_SET_TARGETS.get(muscle_group)
+                if target:
+                    target_min, target_max = target
+                    if avg_sets_per_week < target_min:
+                        vol_status = 'undertrained'
+                        vol_msg = (
+                            f'Averaging {avg_sets_per_week} sets/week. '
+                            f'Aim for {target_min}–{target_max} sets for hypertrophy stimulus.'
+                        )
+                    elif avg_sets_per_week > target_max:
+                        vol_status = 'overtrained'
+                        vol_msg = (
+                            f'Averaging {avg_sets_per_week} sets/week exceeds MRV of {target_max}. '
+                            f'Consider a deload to manage recovery debt.'
+                        )
+                    else:
+                        vol_status = 'optimal'
+                        vol_msg = (
+                            f'Averaging {avg_sets_per_week} sets/week — within the '
+                            f'{target_min}–{target_max} hypertrophy sweet spot.'
+                        )
+                else:
+                    target_min, target_max = None, None
+                    vol_status = 'optimal'
+                    vol_msg = 'No evidence-based target defined for this muscle group.'
+
                 summary[muscle_group] = {
-                    'average_volume_per_week': round(sum(volumes) / len(volumes), 2),
-                    'max_volume_per_week': round(max(volumes), 2),
-                    'min_volume_per_week': round(min(volumes), 2),
-                    'total_weeks_trained': len(volumes),
-                    'total_sets': total_sets,
-                    'total_workouts': total_workouts
+                    'average_volume_per_week': round(sum(volumes) / active_weeks, 2),
+                    'max_volume_per_week':     round(max(volumes), 2),
+                    'min_volume_per_week':     round(min(volumes), 2),
+                    'total_weeks_trained':     active_weeks,
+                    'total_sets':              total_sets,
+                    'total_workouts':          total_workouts,
+                    'sets_per_week':           avg_sets_per_week,
+                    'target_min':              target_min,
+                    'target_max':              target_max,
+                    'volume_status':           vol_status,
+                    'volume_status_message':   vol_msg,
                 }
             else:
+                target = WEEKLY_SET_TARGETS.get(muscle_group)
+                target_min, target_max = target if target else (None, None)
                 summary[muscle_group] = {
                     'average_volume_per_week': 0.0,
-                    'max_volume_per_week': 0.0,
-                    'min_volume_per_week': 0.0,
-                    'total_weeks_trained': 0,
-                    'total_sets': 0,
-                    'total_workouts': 0
+                    'max_volume_per_week':     0.0,
+                    'min_volume_per_week':     0.0,
+                    'total_weeks_trained':     0,
+                    'total_sets':              0,
+                    'total_workouts':          0,
+                    'sets_per_week':           0.0,
+                    'target_min':              target_min,
+                    'target_max':              target_max,
+                    'volume_status':           'untrained',
+                    'volume_status_message':   (
+                        f'No sets recorded. Aim for {target_min}–{target_max} sets/week.'
+                        if target_min is not None
+                        else 'No sets recorded for this muscle group.'
+                    ),
                 }
         
+        # --- Feature 2: Antagonist Balance Analysis ---
+        balance = {}
+        for muscle_a, muscle_b, threshold, label in ANTAGONIST_PAIRS:
+            sets_a = summary.get(muscle_a, {}).get('total_sets', 0)
+            sets_b = summary.get(muscle_b, {}).get('total_sets', 0)
+
+            if sets_a == 0 and sets_b == 0:
+                balance[f'{muscle_a}_vs_{muscle_b}'] = {
+                    'label':    label,
+                    'sets_a':   sets_a,
+                    'sets_b':   sets_b,
+                    'muscle_a': muscle_a,
+                    'muscle_b': muscle_b,
+                    'ratio':    None,
+                    'status':   'no_data',
+                    'message':  f'No training data for {label}.',
+                }
+                continue
+
+            if sets_b == 0:
+                ratio = None
+                is_imbalanced = True
+                msg = (
+                    f'You train {muscle_a} but have no {muscle_b} sets recorded. '
+                    f'Add {muscle_b} work to prevent postural imbalance.'
+                )
+            elif sets_a == 0:
+                ratio = None
+                is_imbalanced = True
+                msg = (
+                    f'You train {muscle_b} but have no {muscle_a} sets recorded. '
+                    f'Add {muscle_a} work to prevent postural imbalance.'
+                )
+            else:
+                if sets_a >= sets_b:
+                    ratio = round(sets_a / sets_b, 2)
+                    dominant, weaker = muscle_a, muscle_b
+                else:
+                    ratio = round(sets_b / sets_a, 2)
+                    dominant, weaker = muscle_b, muscle_a
+
+                is_imbalanced = ratio > threshold
+                if is_imbalanced:
+                    msg = (
+                        f'{dominant.capitalize()} dominates {weaker} at a {ratio:.1f}:1 ratio '
+                        f'(threshold {threshold}:1). Increase {weaker} volume to restore balance.'
+                    )
+                else:
+                    msg = (
+                        f'{label} ratio is {ratio:.1f}:1 — within the balanced range '
+                        f'(threshold {threshold}:1).'
+                    )
+
+            balance[f'{muscle_a}_vs_{muscle_b}'] = {
+                'label':    label,
+                'sets_a':   sets_a,
+                'sets_b':   sets_b,
+                'muscle_a': muscle_a,
+                'muscle_b': muscle_b,
+                'ratio':    ratio,
+                'status':   'imbalanced' if is_imbalanced else 'balanced',
+                'message':  msg,
+            }
+
         return Response({
             'period': {
                 'start_date': start_date.isoformat(),
                 'end_date': end_date.isoformat(),
                 'total_weeks': len(weeks_list)
             },
-            'weeks': weeks_list,
-            'summary': summary,
-            'is_pro': is_pro,
+            'weeks':      weeks_list,
+            'summary':    summary,
+            'balance':    balance,
+            'is_pro':     is_pro,
             'weeks_limit': max_weeks_free if not is_pro else None
         }, status=status.HTTP_200_OK)
 
@@ -380,6 +535,79 @@ class WorkoutSummaryView(ConditionalGetMixin, APIView):
 
         score = round(max(0.0, min(10.0, score)), 1)
 
+        # --- Feature 4: Workout Diagnosis (Root Cause Analysis) ---
+        has_pre_recovery_data = bool(pre_recovery_dict)
+
+        fatigued_muscles = [
+            muscle for muscle, data in negatives.items()
+            if data.get('type') == 'recovery'
+        ]
+        performance_drop_exercises = [
+            key for key, data in negatives.items()
+            if data.get('type') == '1rm'
+        ]
+
+        if not has_pre_recovery_data:
+            primary_issue = 'insufficient_data'
+            diag_message = (
+                'No pre-workout muscle recovery snapshot was recorded for this session. '
+                'Start your workouts through the app to enable automatic recovery tracking.'
+            )
+            recommendation = (
+                'Open the app before your next workout so recovery data is captured automatically.'
+            )
+        elif fatigued_muscles and score < 6.0:
+            primary_issue = 'fatigue_accumulation'
+            muscle_list = ', '.join(m.capitalize() for m in fatigued_muscles)
+            diag_message = (
+                f'{muscle_list} entered this session under-recovered (< 70%). '
+                'Training fatigued muscles suppresses performance and increases injury risk.'
+            )
+            recommendation = (
+                'Schedule an additional 24–48 h of rest for these muscles before training them again. '
+                'Consider active recovery (walking, light cardio) rather than heavy loading.'
+            )
+        elif performance_drop_exercises and not fatigued_muscles:
+            primary_issue = 'performance_drop'
+            ex_list = ', '.join(
+                negatives[k]['message'].split(':')[0]
+                for k in performance_drop_exercises
+            )
+            diag_message = (
+                f'1RM dropped > 5% on {ex_list} despite adequate muscle recovery. '
+                'This points to systemic stressors rather than localised muscle fatigue.'
+            )
+            recommendation = (
+                'Check sleep quality (aim for 7–9 h), hydration, and caloric intake. '
+                'High life stress elevates cortisol and suppresses acute strength output.'
+            )
+        elif score >= 7.0:
+            primary_issue = 'good_session'
+            diag_message = (
+                'Muscles were well-recovered and performance was maintained or improved. '
+                'This is the ideal training state.'
+            )
+            recommendation = (
+                'Maintain your current recovery schedule. '
+                'Look for opportunities to add a small amount of load or volume next session.'
+            )
+        else:
+            primary_issue = 'overreaching'
+            diag_message = (
+                'Session score is below 7 without a single dominant cause. '
+                'This often reflects accumulated fatigue across multiple sessions.'
+            )
+            recommendation = (
+                'Consider a deload week: reduce volume by 40–50% while maintaining intensity. '
+                'Prioritise sleep and protein intake (1.6–2.2 g/kg body weight).'
+            )
+
+        diagnosis = {
+            'primary_issue':  primary_issue,
+            'message':        diag_message,
+            'recommendation': recommendation,
+        }
+
         return Response({
             'workout_id': workout.id,
             'score': score,
@@ -393,7 +621,8 @@ class WorkoutSummaryView(ConditionalGetMixin, APIView):
                 'muscles_worked': sorted(muscles_worked),
                 'exercises_performed': len(exercise_1rm_data),
             },
-            'is_pro': is_pro,
+            'diagnosis':            diagnosis,
+            'is_pro':               is_pro,
             'has_advanced_insights': is_pro,
         }, status=status.HTTP_200_OK)
 
@@ -534,4 +763,117 @@ class UserStatsView(ConditionalGetMixin, APIView):
                 'active_days_last_30': active_days_last_30,
                 'avg_sessions_per_week': avg_sessions_per_week,
             },
+        }, status=status.HTTP_200_OK)
+
+
+class OverloadTrendView(ConditionalGetMixin, APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_last_modified(self, request, exercise_id=None, **kwargs):
+        return WorkoutExercise.objects.filter(
+            exercise_id=exercise_id,
+            workout__user=request.user,
+            workout__is_done=True,
+            one_rep_max__isnull=False,
+        ).aggregate(Max('updated_at'))['updated_at__max']
+
+    def get(self, request, exercise_id):
+        """
+        GET /api/workout/exercise/<exercise_id>/overload-trend/
+        PRO only. Analyses the last 8 weeks of 1RM data for an exercise via
+        linear regression and classifies the progression trend.
+        """
+        if not is_pro_user(request.user):
+            return get_pro_response()
+
+        try:
+            exercise = Exercise.objects.get(id=exercise_id)
+        except Exercise.DoesNotExist:
+            return Response({'error': 'Exercise not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        eight_weeks_ago = timezone.now() - timedelta(weeks=8)
+
+        qs = (
+            WorkoutExercise.objects
+            .filter(
+                exercise_id=exercise_id,
+                workout__user=request.user,
+                workout__is_done=True,
+                one_rep_max__isnull=False,
+                workout__datetime__gte=eight_weeks_ago,
+            )
+            .select_related('workout')
+            .order_by('workout__datetime')
+        )
+
+        data_points = [
+            {
+                'date':        we.workout.datetime.date().isoformat(),
+                'one_rep_max': round(float(we.one_rep_max), 2),
+            }
+            for we in qs
+        ]
+
+        n = len(data_points)
+
+        if n < 2:
+            return Response({
+                'exercise_id':    exercise_id,
+                'exercise_name':  exercise.name,
+                'trend':          'insufficient_data',
+                'data_points':    data_points,
+                'weeks_analyzed': 8,
+                'change_kg':      None,
+                'change_percent': None,
+                'message': (
+                    'Not enough data to detect a trend. '
+                    'Log at least 2 sessions with this exercise in the past 8 weeks.'
+                ),
+            })
+
+        base = date_type.fromisoformat(data_points[0]['date'])
+        x_vals = [(date_type.fromisoformat(dp['date']) - base).days for dp in data_points]
+        y_vals = [dp['one_rep_max'] for dp in data_points]
+
+        slope, _ = _linear_regression(x_vals, y_vals)
+
+        first_1rm = y_vals[0]
+        last_1rm  = y_vals[-1]
+        change_kg  = round(last_1rm - first_1rm, 2)
+        change_pct = round((change_kg / first_1rm * 100) if first_1rm > 0 else 0.0, 1)
+
+        if n >= 4 and abs(change_pct) < 1.0:
+            trend = 'stagnating'
+            message = (
+                f'1RM has barely changed over the last {n} sessions '
+                f'({change_pct:+.1f}%). Try a rep scheme or exercise variation change.'
+            )
+        elif slope is not None and slope > 0 and change_pct >= 1.0:
+            trend = 'progressing'
+            message = (
+                f'Solid upward trend — {change_kg:+.1f} kg ({change_pct:+.1f}%) '
+                f'over {n} sessions. Keep progressive overload consistent.'
+            )
+        elif slope is not None and slope < 0 and change_pct <= -1.0:
+            trend = 'regressing'
+            message = (
+                f'1RM has declined {abs(change_kg):.1f} kg ({change_pct:.1f}%) over '
+                f'{n} sessions. Review recovery, nutrition, and technique.'
+            )
+        else:
+            trend = 'insufficient_data'
+            message = (
+                f'Only {n} data points available. '
+                'Log more sessions to establish a reliable trend.'
+            )
+
+        return Response({
+            'exercise_id':    exercise_id,
+            'exercise_name':  exercise.name,
+            'trend':          trend,
+            'data_points':    data_points,
+            'weeks_analyzed': 8,
+            'change_kg':      change_kg,
+            'change_percent': change_pct,
+            'message':        message,
         }, status=status.HTTP_200_OK)

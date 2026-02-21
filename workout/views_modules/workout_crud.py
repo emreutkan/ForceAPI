@@ -13,6 +13,7 @@ except ImportError:
 from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
 from django.utils.http import http_date
+from django.db import transaction
 from django.db.models import Max
 from datetime import datetime, time
 from django.core.cache import cache
@@ -116,12 +117,32 @@ class CreateWorkoutView(APIView):
 
         serializer = CreateWorkoutSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            workout = serializer.save()
-
-            if not workout.is_done and not workout.is_rest_day:
-                recovery_progress = get_current_recovery_progress(request.user)
-                create_workout_muscle_recovery(request.user, workout, 'pre', recovery_progress)
-
+            try:
+                with transaction.atomic():
+                    workout = serializer.save()
+                    if not workout.is_done and not workout.is_rest_day:
+                        recovery_progress = get_current_recovery_progress(request.user)
+                        try:
+                            with transaction.atomic():
+                                create_workout_muscle_recovery(
+                                    request.user, workout, 'pre', recovery_progress
+                                )
+                        except Exception as inner_e:
+                            logger.error(f"Failed to create muscle recovery pre-workout: {inner_e}")
+                            # Suppress error to allow workout creation to succeed
+            except Exception as e:
+                logger.exception("Workout create failed: %s", e)
+                return Response(
+                    {
+                        'error': 'WORKOUT_CREATE_FAILED',
+                        'message': (
+                            'Creating workout failed. If you restored the database, '
+                            'run: python manage.py fix_sequences'
+                        ),
+                        'detail': str(e),
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

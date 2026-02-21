@@ -45,10 +45,13 @@ from .views_modules import (
     GetTrainingFrequencyRecommendationsView,
     GetRelevantResearchView,
     GetMuscleRecoveryStatusView,
+    SuggestNextExerciseView,
+    ExerciseOptimizationCheckView,
     # Analytics
     VolumeAnalysisView,
     WorkoutSummaryView,
     UserStatsView,
+    OverloadTrendView,
 )
 
 # Re-export everything for backward compatibility
@@ -87,8 +90,11 @@ __all__ = [
     'GetTrainingFrequencyRecommendationsView',
     'GetRelevantResearchView',
     'GetMuscleRecoveryStatusView',
+    'SuggestNextExerciseView',
+    'ExerciseOptimizationCheckView',
     'VolumeAnalysisView',
     'WorkoutSummaryView',
     'UserStatsView',
+    'OverloadTrendView',
 ]
     

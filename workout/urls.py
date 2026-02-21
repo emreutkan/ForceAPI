@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import CreateWorkoutView, AddExerciseToWorkoutView, AddExerciseSetToWorkoutExerciseView, GetWorkoutView, GetActiveWorkoutView, DeleteExerciseSetView, DeleteWorkoutExerciseView, UpdateExerciseOrderView, CompleteWorkoutView, DeleteWorkoutView, CheckPreviousWorkoutPerformedView, CheckWorkoutPerformedTodayView, CreateTemplateWorkoutView, GetTemplateWorkoutsView, StartTemplateWorkoutView, DeleteTemplateWorkoutView, UpdateWorkoutView, UpdateExerciseSetView, GetRestTimerStateView, StopRestTimerView, ResumeRestTimerView, CalendarView, GetAvailableYearsView, CalendarStatsView, GetExercise1RMHistoryView, GetExerciseSetHistoryView, GetExerciseLastWorkoutView, GetRecoveryRecommendationsView, GetRestPeriodRecommendationsView, GetTrainingFrequencyRecommendationsView, GetRelevantResearchView, GetMuscleRecoveryStatusView, VolumeAnalysisView, WorkoutSummaryView, UserStatsView
+from .views import CreateWorkoutView, AddExerciseToWorkoutView, AddExerciseSetToWorkoutExerciseView, GetWorkoutView, GetActiveWorkoutView, DeleteExerciseSetView, DeleteWorkoutExerciseView, UpdateExerciseOrderView, CompleteWorkoutView, DeleteWorkoutView, CheckPreviousWorkoutPerformedView, CheckWorkoutPerformedTodayView, CreateTemplateWorkoutView, GetTemplateWorkoutsView, StartTemplateWorkoutView, DeleteTemplateWorkoutView, UpdateWorkoutView, UpdateExerciseSetView, GetRestTimerStateView, StopRestTimerView, ResumeRestTimerView, CalendarView, GetAvailableYearsView, CalendarStatsView, GetExercise1RMHistoryView, GetExerciseSetHistoryView, GetExerciseLastWorkoutView, GetRecoveryRecommendationsView, GetRestPeriodRecommendationsView, GetTrainingFrequencyRecommendationsView, GetRelevantResearchView, GetMuscleRecoveryStatusView, VolumeAnalysisView, WorkoutSummaryView, UserStatsView, OverloadTrendView, SuggestNextExerciseView, ExerciseOptimizationCheckView
 urlpatterns = [
     path('create/', CreateWorkoutView.as_view(), name='create-workout'),
     path('list/', GetWorkoutView.as_view(), name='list-workouts'),
@@ -18,12 +18,15 @@ urlpatterns = [
     path('exercise/<int:exercise_id>/1rm-history/', GetExercise1RMHistoryView.as_view(), name='exercise-1rm-history'),
     path('exercise/<int:exercise_id>/set-history/', GetExerciseSetHistoryView.as_view(), name='exercise-set-history'),
     path('exercise/<int:exercise_id>/last-workout/', GetExerciseLastWorkoutView.as_view(), name='exercise-last-workout'),
+    path('exercise/<int:exercise_id>/overload-trend/', OverloadTrendView.as_view(), name='exercise-overload-trend'),
     # Training recommendations endpoints
     path('recommendations/recovery/', GetRecoveryRecommendationsView.as_view(), name='recovery-recommendations'),
     path('exercise/<int:workout_exercise_id>/rest-recommendations/', GetRestPeriodRecommendationsView.as_view(), name='rest-recommendations'),
     path('recommendations/frequency/', GetTrainingFrequencyRecommendationsView.as_view(), name='frequency-recommendations'),
     path('research/', GetRelevantResearchView.as_view(), name='relevant-research'),
     path('recovery/status/', GetMuscleRecoveryStatusView.as_view(), name='muscle-recovery-status'),
+    path('active/suggest-exercise/', SuggestNextExerciseView.as_view(), name='suggest-next-exercise'),
+    path('exercise/<int:workout_exercise_id>/optimization-check/', ExerciseOptimizationCheckView.as_view(), name='exercise-optimization-check'),
     path('volume-analysis/', VolumeAnalysisView.as_view(), name='volume-analysis'),
     path('user-stats/', UserStatsView.as_view(), name='user-stats'),
     path('set/<int:set_id>/update/', UpdateExerciseSetView.as_view(), name='update-set'),

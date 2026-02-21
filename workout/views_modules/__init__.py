@@ -54,12 +54,15 @@ from .workout_recovery import (
     GetTrainingFrequencyRecommendationsView,
     GetRelevantResearchView,
     GetMuscleRecoveryStatusView,
+    SuggestNextExerciseView,
+    ExerciseOptimizationCheckView,
 )
 
 from .workout_analytics import (
     VolumeAnalysisView,
     WorkoutSummaryView,
     UserStatsView,
+    OverloadTrendView,
 )
 
 # Re-export everything
@@ -103,10 +106,13 @@ __all__ = [
     'GetTrainingFrequencyRecommendationsView',
     'GetRelevantResearchView',
     'GetMuscleRecoveryStatusView',
+    'SuggestNextExerciseView',
+    'ExerciseOptimizationCheckView',
     # Analytics
     'VolumeAnalysisView',
     'WorkoutSummaryView',
     'UserStatsView',
+    'OverloadTrendView',
     # Pagination
     'WorkoutPagination',
 ]

@@ -330,3 +330,298 @@ class GetMuscleRecoveryStatusView(ConditionalGetMixin, APIView):
             'is_pro': is_pro_user(request.user),
             'timestamp': timezone.now().isoformat()
         }, status=status.HTTP_200_OK)
+
+
+def _get_muscle_recovery_pct(user, muscle_group):
+    """
+    Return the current recovery percentage (0-100) for a muscle group.
+    Returns 100 if no record exists (never trained = fully recovered).
+    """
+    record = (
+        MuscleRecovery.objects
+        .filter(user=user, muscle_group=muscle_group)
+        .select_related('source_workout')
+        .order_by('-source_workout__datetime', '-recovery_until')
+        .first()
+    )
+    if not record:
+        return 100.0
+
+    record.update_recovery_status()
+
+    if record.is_recovered:
+        return 100.0
+
+    # Reproduce the J-curve from MuscleRecoverySerializer
+    if not record.recovery_until:
+        return 100.0
+
+    workout_time = record.source_workout.datetime if record.source_workout else record.created_at
+    total_duration = record.recovery_until - workout_time
+    elapsed = timezone.now() - workout_time
+
+    if total_duration.total_seconds() <= 0:
+        return 100.0
+
+    linear_progress = elapsed.total_seconds() / total_duration.total_seconds()
+
+    if linear_progress <= 0.3:
+        non_linear = linear_progress * 0.7
+    elif linear_progress <= 0.7:
+        non_linear = 0.21 + (linear_progress - 0.3) * 1.225
+    else:
+        non_linear = 0.7 + (linear_progress - 0.7) * 1.0
+
+    return min(100.0, max(0.0, round(non_linear * 100, 1)))
+
+
+def _count_working_sets_in_active_workout(active_workout, muscle_group):
+    """
+    Count non-warmup sets already logged in the *current active (incomplete)*
+    workout for a specific muscle group (primary only).
+    """
+    from exercise.models import Exercise as ExerciseModel
+    count = 0
+    for we in active_workout.workoutexercise_set.select_related('exercise').prefetch_related('sets').all():
+        if we.exercise.primary_muscle == muscle_group:
+            count += we.sets.filter(is_warmup=False).count()
+    return count
+
+
+class SuggestNextExerciseView(APIView):
+    """
+    GET /api/workout/active/suggest-exercise/
+
+    Returns ordered muscle-group suggestions for the current active workout,
+    ranked by recovery percentage (highest first).
+
+    Rules:
+    - Only suggest muscles >= 80% recovered.
+    - Never suggest a muscle that is already worked in the active workout
+      AND has >= 4 non-warmup sets logged (it's done for today).
+    - Muscles with no MuscleRecovery record are treated as 100% recovered.
+    - Muscles already in the active workout but with < 4 sets are included
+      so the user can add more sets — they are flagged with
+      already_in_workout=True.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from exercise.models import Exercise as ExerciseModel
+
+        # ── Active workout ────────────────────────────────────────────────
+        active_workout = Workout.objects.filter(
+            user=request.user, is_done=False
+        ).prefetch_related(
+            'workoutexercise_set__exercise',
+            'workoutexercise_set__sets',
+        ).first()
+
+        # Muscles already in the active workout + their working-set count
+        muscles_in_workout = {}  # muscle_group -> working_set_count
+        if active_workout:
+            for we in active_workout.workoutexercise_set.all():
+                mg = we.exercise.primary_muscle
+                if mg not in muscles_in_workout:
+                    muscles_in_workout[mg] = 0
+                muscles_in_workout[mg] += we.sets.filter(is_warmup=False).count()
+
+        all_muscle_groups = [choice[0] for choice in ExerciseModel.MUSCLE_GROUPS]
+
+        suggestions = []
+        for muscle_group in all_muscle_groups:
+            set_count = muscles_in_workout.get(muscle_group, 0)
+
+            # Skip: already has 4+ working sets in the active workout
+            if set_count >= 4:
+                continue
+
+            pct = _get_muscle_recovery_pct(request.user, muscle_group)
+
+            # Only suggest muscles that are >= 80% recovered
+            if pct < 80.0:
+                continue
+
+            suggestions.append({
+                'muscle_group':      muscle_group,
+                'recovery_percent':  pct,
+                'already_in_workout': muscle_group in muscles_in_workout,
+                'working_sets_logged': set_count,
+            })
+
+        # Sort: fully recovered (100%) first, then by descending recovery %
+        suggestions.sort(key=lambda x: x['recovery_percent'], reverse=True)
+
+        return Response({
+            'suggestions':     suggestions,
+            'has_active_workout': active_workout is not None,
+        }, status=status.HTTP_200_OK)
+
+
+class ExerciseOptimizationCheckView(APIView):
+    """
+    GET /api/workout/exercise/<workout_exercise_id>/optimization-check/
+
+    Called immediately after a user adds an exercise to their active workout.
+    Returns recovery and volume warnings for:
+
+    1. Primary muscle recovery  (red warning if < 70%)
+    2. Secondary muscle recovery  (yellow warning if any secondary < 70-80%)
+    3. In-workout set volume for the primary muscle
+       - 2–3 working sets already logged  → semi-warning (48h recovery risk)
+       - 4+  working sets already logged  → hard warning (stop, no benefit)
+
+    No PRO gate — shown to all users in real-time while building a workout.
+    """
+    permission_classes = [IsAuthenticated]
+
+    # Thresholds
+    PRIMARY_HARD_STOP  = 70.0   # < 70 % → do not train
+    SECONDARY_WARN     = 80.0   # < 80 % → soft warning on secondary
+    SETS_SEMI_WARN     = 2      # 2-3 sets already done → caution
+    SETS_HARD_WARN     = 4      # 4+ sets already done  → stop
+
+    def get(self, request, workout_exercise_id):
+        # ── Load the workout exercise ──────────────────────────────────────
+        try:
+            workout_exercise = (
+                WorkoutExercise.objects
+                .select_related('exercise', 'workout')
+                .get(id=workout_exercise_id, workout__user=request.user)
+            )
+        except WorkoutExercise.DoesNotExist:
+            return Response(
+                {'error': 'Workout exercise not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        exercise = workout_exercise.exercise
+        workout  = workout_exercise.workout
+
+        primary  = exercise.primary_muscle
+        secondaries = [m for m in (exercise.secondary_muscles or []) if m]
+
+        # ── Recovery checks ───────────────────────────────────────────────
+        primary_pct = _get_muscle_recovery_pct(request.user, primary)
+
+        secondary_results = []
+        for sec in secondaries:
+            sec_pct = _get_muscle_recovery_pct(request.user, sec)
+            secondary_results.append({
+                'muscle_group':      sec,
+                'recovery_percent':  sec_pct,
+            })
+
+        # ── In-workout working-set count for the PRIMARY muscle ───────────
+        # Count across ALL exercises in this workout that target the primary muscle
+        sets_in_workout = 0
+        for we in workout.workoutexercise_set.select_related('exercise').prefetch_related('sets').all():
+            if we.exercise.primary_muscle == primary:
+                sets_in_workout += we.sets.filter(is_warmup=False).count()
+
+        # ── Build warnings ────────────────────────────────────────────────
+        warnings = []
+
+        # 1. Primary recovery
+        if primary_pct < self.PRIMARY_HARD_STOP:
+            warnings.append({
+                'type':     'primary_not_recovered',
+                'severity': 'error',
+                'muscle':   primary,
+                'recovery_percent': primary_pct,
+                'message': (
+                    f'{primary.replace("_", " ").capitalize()} is only {primary_pct:.0f}% recovered. '
+                    'Training an under-recovered muscle significantly increases injury risk and '
+                    'produces less stimulus than waiting for full recovery.'
+                ),
+                'recommendation': (
+                    f'Wait until {primary.replace("_", " ").capitalize()} reaches at least 70% recovery '
+                    'before training it again. Choose a different muscle group today.'
+                ),
+            })
+
+        # 2. Secondary muscles
+        for sec in secondary_results:
+            if sec['recovery_percent'] < self.SECONDARY_WARN:
+                # Find a primary-only alternative hint
+                warnings.append({
+                    'type':     'secondary_not_recovered',
+                    'severity': 'warning',
+                    'muscle':   sec['muscle_group'],
+                    'recovery_percent': sec['recovery_percent'],
+                    'message': (
+                        f'{sec["muscle_group"].replace("_", " ").capitalize()} '
+                        f'({sec["recovery_percent"]:.0f}% recovered) is a secondary muscle for '
+                        f'{exercise.name}. This exercise will stress it before it\'s fully ready.'
+                    ),
+                    'recommendation': (
+                        f'If you want to train {primary.replace("_", " ").capitalize()} today, '
+                        f'consider an isolation exercise that targets {primary.replace("_", " ").capitalize()} '
+                        f'without involving {sec["muscle_group"].replace("_", " ").capitalize()}.'
+                    ),
+                })
+
+        # 3. In-workout volume
+        if sets_in_workout >= self.SETS_HARD_WARN:
+            warnings.append({
+                'type':     'excessive_volume',
+                'severity': 'error',
+                'muscle':   primary,
+                'sets_already_done': sets_in_workout,
+                'message': (
+                    f'You have already logged {sets_in_workout} working sets for '
+                    f'{primary.replace("_", " ").capitalize()} this session. '
+                    'Additional sets provide no meaningful extra stimulus and extend recovery time '
+                    'well beyond 48 hours.'
+                ),
+                'recommendation': (
+                    f'Stop training {primary.replace("_", " ").capitalize()} today. '
+                    'More sets at this point only accumulate fatigue without adding growth signal.'
+                ),
+            })
+        elif sets_in_workout >= self.SETS_SEMI_WARN:
+            warnings.append({
+                'type':     'high_volume',
+                'severity': 'warning',
+                'muscle':   primary,
+                'sets_already_done': sets_in_workout,
+                'message': (
+                    f'You already have {sets_in_workout} working sets for '
+                    f'{primary.replace("_", " ").capitalize()} this session. '
+                    'Adding more will push recovery time beyond 48 hours, '
+                    'making it harder to train this muscle again before the week ends.'
+                ),
+                'recommendation': (
+                    'Limit to 1–2 more sets maximum, then move to a different muscle group.'
+                ),
+            })
+
+        # ── Overall status ────────────────────────────────────────────────
+        has_errors   = any(w['severity'] == 'error'   for w in warnings)
+        has_warnings = any(w['severity'] == 'warning' for w in warnings)
+
+        if has_errors:
+            overall_status = 'not_recommended'
+        elif has_warnings:
+            overall_status = 'proceed_with_caution'
+        else:
+            overall_status = 'optimal'
+
+        return Response({
+            'workout_exercise_id': workout_exercise_id,
+            'exercise': {
+                'id':              exercise.id,
+                'name':            exercise.name,
+                'primary_muscle':  primary,
+                'secondary_muscles': secondaries,
+                'category':        exercise.category,
+            },
+            'primary_recovery': {
+                'muscle_group':     primary,
+                'recovery_percent': primary_pct,
+            },
+            'secondary_recovery': secondary_results,
+            'sets_in_workout':   sets_in_workout,
+            'overall_status':    overall_status,
+            'warnings':          warnings,
+        }, status=status.HTTP_200_OK)
