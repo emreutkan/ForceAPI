@@ -7,12 +7,10 @@ from django.db import migrations
 
 def reset_workoutmusclerecovery_sequence(apps, schema_editor):
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute("""
-            SELECT setval(
-                pg_get_serial_sequence('workout_workoutmusclerecovery', 'id'),
-                COALESCE((SELECT MAX(id) FROM workout_workoutmusclerecovery), 0)
-            );
-        """)
+        cursor.execute("SELECT MAX(id) FROM workout_workoutmusclerecovery")
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            cursor.execute(f"SELECT setval(pg_get_serial_sequence('workout_workoutmusclerecovery', 'id'), {row[0]})")
 
 
 def noop(apps, schema_editor):

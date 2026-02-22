@@ -22,7 +22,10 @@ DATABASE_URL = env('DATABASE_URL')
 if IS_LOCAL:
     DEBUG = True
     ALLOWED_HOSTS = ['*']
-    DATABASES = {'default': env.db('DATABASE_URL')}
+    DATABASES = {
+        'default': env.db('DATABASE_URL'),
+        'vectordb': env.db('VECTOR_DATABASE_URL', default='sqlite:///' + str(BASE_DIR / 'vector.sqlite3'))
+    }
 
 elif not IS_LOCAL and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     DEBUG = False
@@ -38,7 +41,8 @@ elif not IS_LOCAL and DATABASE_URL:  # Production: Docker or bare metal (OCI)
     ALLOWED_HOSTS = list(_with_ports)
 
     DATABASES = {
-        'default': env.db('DATABASE_URL')
+        'default': env.db('DATABASE_URL'),
+        'vectordb': env.db('VECTOR_DATABASE_URL', default='sqlite:///' + str(BASE_DIR / 'vector.sqlite3'))
     }
     _origins = env.list('CSRF_TRUSTED_ORIGINS', default=['http://89.167.52.206'])
     CSRF_TRUSTED_ORIGINS = [o.strip() for o in _origins if o.strip()]
@@ -84,6 +88,7 @@ INSTALLED_APPS = [
     'workout',
     'body_measurements',
     'drf_spectacular',
+    'ai_chat',
 ]
 
 
@@ -242,6 +247,18 @@ REST_FRAMEWORK = {
 # Logging Configuration
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)  # Create logs directory if it doesn't exist
+
+# LLM Configuration
+LOCAL_LLM = env.bool('LOCAL_LLM', default=True)
+
+if LOCAL_LLM:
+    LLM_BASE_URL = env('LOCAL_LLM_HOST', default='http://192.168.1.2:11434') + '/v1'
+    LLM_MODEL = env('LOCAL_LLM_MODEL', default='deepseek-r1:8b')
+    LLM_API_KEY = 'ollama'  # Ollama doesn't need a real key but openai client requires one
+else:
+    LLM_BASE_URL = 'https://api.deepseek.com'
+    LLM_MODEL = env('LLM_MODEL', default='deepseek-chat')
+    LLM_API_KEY = env('LLM_API_KEY')
 
 LOGGING = {
     'version': 1,
