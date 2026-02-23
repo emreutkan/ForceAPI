@@ -52,6 +52,15 @@ from .views_modules import (
     WorkoutSummaryView,
     UserStatsView,
     OverloadTrendView,
+    # Programs
+    CreateWorkoutProgramView,
+    GetWorkoutProgramsView,
+    GetWorkoutProgramView,
+    UpdateWorkoutProgramView,
+    DeleteWorkoutProgramView,
+    ActivateWorkoutProgramView,
+    DeactivateWorkoutProgramView,
+    CurrentProgramDayView,
 )
 
 # Re-export everything for backward compatibility
@@ -96,5 +105,12 @@ __all__ = [
     'WorkoutSummaryView',
     'UserStatsView',
     'OverloadTrendView',
+    'CreateWorkoutProgramView',
+    'GetWorkoutProgramsView',
+    'GetWorkoutProgramView',
+    'UpdateWorkoutProgramView',
+    'DeleteWorkoutProgramView',
+    'ActivateWorkoutProgramView',
+    'DeactivateWorkoutProgramView',
+    'CurrentProgramDayView',
 ]
-    

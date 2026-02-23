@@ -249,9 +249,16 @@ LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)  # Create logs directory if it doesn't exist
 
 # LLM Configuration
+# Priority: GEMINI=True > LOCAL_LLM=False (DeepSeek) > LOCAL_LLM=True (Ollama)
 LOCAL_LLM = env.bool('LOCAL_LLM', default=True)
+GEMINI = env.bool('GEMINI', default=False)
 
-if LOCAL_LLM:
+if GEMINI:
+    # Google Gemini via its OpenAI-compatible endpoint — no extra package needed
+    LLM_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
+    LLM_MODEL = env('GEMINI_MODEL', default='gemini-2.0-flash')
+    LLM_API_KEY = env('GEMINI_API_KEY')
+elif LOCAL_LLM:
     LLM_BASE_URL = env('LOCAL_LLM_HOST', default='http://192.168.1.2:11434') + '/v1'
     LLM_MODEL = env('LOCAL_LLM_MODEL', default='deepseek-r1:8b')
     LLM_API_KEY = 'ollama'  # Ollama doesn't need a real key but openai client requires one

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Workout, WorkoutExercise, ExerciseSet, TemplateWorkout, TemplateWorkoutExercise, TrainingResearch, MuscleRecovery, WorkoutMuscleRecovery, CNSRecovery
+from .models import Workout, WorkoutExercise, ExerciseSet, TemplateWorkout, TemplateWorkoutExercise, TrainingResearch, MuscleRecovery, WorkoutMuscleRecovery, CNSRecovery, WorkoutProgram, WorkoutProgramDay, WorkoutProgramExercise
 from django.utils import timezone
 from datetime import datetime
 from exercise.serializers import ExerciseSerializer
@@ -505,16 +505,16 @@ class MuscleRecoverySerializer(serializers.ModelSerializer):
 class CNSRecoverySerializer(serializers.ModelSerializer):
     hours_until_recovery = serializers.SerializerMethodField()
     recovery_percentage = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = CNSRecovery
         fields = [
-            'id', 'cns_load', 'recovery_hours', 'recovery_until', 
-            'is_recovered', 'source_workout', 'hours_until_recovery', 
+            'id', 'cns_load', 'recovery_hours', 'recovery_until',
+            'is_recovered', 'source_workout', 'hours_until_recovery',
             'recovery_percentage', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
+
     def get_hours_until_recovery(self, obj):
         """Calculate hours until recovery"""
         if obj.recovery_until:
@@ -522,7 +522,7 @@ class CNSRecoverySerializer(serializers.ModelSerializer):
             if delta.total_seconds() > 0:
                 return round(delta.total_seconds() / 3600, 1)
         return 0
-    
+
     def get_recovery_percentage(self, obj):
         """
         Calculate CNS recovery percentage using non-linear J-curve model.
@@ -530,21 +530,21 @@ class CNSRecoverySerializer(serializers.ModelSerializer):
         """
         if not obj.recovery_until or obj.is_recovered:
             return 100
-        
+
         # Calculate percentage based on time elapsed
         workout_time = obj.source_workout.datetime if obj.source_workout else obj.created_at
         total_duration = obj.recovery_until - workout_time
         elapsed = timezone.now() - workout_time
-        
+
         if total_duration.total_seconds() <= 0:
             return 100
-        
+
         # Non-linear recovery curve (J-curve model)
         # 0-24h: Inflammation phase - slower recovery (0-30%)
         # 24-48h: Protein synthesis phase - accelerated recovery (30-70%)
         # 48h+: Structural repair - final recovery (70-100%)
         linear_progress = elapsed.total_seconds() / total_duration.total_seconds()
-        
+
         # Apply J-curve transformation
         if linear_progress <= 0.3:
             # Early phase - inflammation, slower recovery
@@ -555,6 +555,116 @@ class CNSRecoverySerializer(serializers.ModelSerializer):
         else:
             # Final phase - structural repair completion
             non_linear_progress = 0.7 + (linear_progress - 0.7) * 1.0
-        
+
         percentage = non_linear_progress * 100
         return min(100, max(0, round(percentage, 1)))
+
+
+# ---------------------------------------------------------------------------
+# Workout Program serializers
+# ---------------------------------------------------------------------------
+
+class WorkoutProgramExerciseInputSerializer(serializers.Serializer):
+    """Used when creating a program day's exercises."""
+    exercise_id = serializers.IntegerField()
+    target_sets = serializers.IntegerField(min_value=1, max_value=50)
+    order = serializers.IntegerField(min_value=1, required=False)
+
+
+class WorkoutProgramDayInputSerializer(serializers.Serializer):
+    """Used when creating a program's days."""
+    day_number = serializers.IntegerField(min_value=1)
+    name = serializers.CharField(max_length=255)
+    is_rest_day = serializers.BooleanField(default=False)
+    exercises = WorkoutProgramExerciseInputSerializer(many=True, required=False, default=list)
+
+    def validate(self, data):
+        if data.get('is_rest_day') and data.get('exercises'):
+            raise serializers.ValidationError("Rest days cannot have exercises.")
+        return data
+
+
+class CreateWorkoutProgramSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=255)
+    cycle_length = serializers.IntegerField(min_value=1, max_value=30)
+    days = WorkoutProgramDayInputSerializer(many=True)
+
+    def validate(self, data):
+        cycle_length = data['cycle_length']
+        days = data['days']
+
+        if len(days) != cycle_length:
+            raise serializers.ValidationError(
+                f"cycle_length is {cycle_length} but {len(days)} day(s) were provided. "
+                "The number of days must match cycle_length."
+            )
+
+        day_numbers = [d['day_number'] for d in days]
+        if sorted(day_numbers) != list(range(1, cycle_length + 1)):
+            raise serializers.ValidationError(
+                f"day_number values must be exactly 1 through {cycle_length}, each used once."
+            )
+
+        return data
+
+    def create(self, validated_data):
+        from exercise.models import Exercise as ExerciseModel
+        user = self.context['request'].user
+        days_data = validated_data.pop('days')
+
+        program = WorkoutProgram.objects.create(user=user, **validated_data)
+
+        for day_data in days_data:
+            exercises_data = day_data.pop('exercises', [])
+            day = WorkoutProgramDay.objects.create(program=program, **day_data)
+
+            for idx, ex_data in enumerate(exercises_data, start=1):
+                exercise_id = ex_data['exercise_id']
+                try:
+                    exercise = ExerciseModel.objects.get(id=exercise_id)
+                except ExerciseModel.DoesNotExist:
+                    raise serializers.ValidationError(
+                        f"Exercise with id {exercise_id} does not exist."
+                    )
+                WorkoutProgramExercise.objects.create(
+                    program_day=day,
+                    exercise=exercise,
+                    order=ex_data.get('order', idx),
+                    target_sets=ex_data['target_sets'],
+                )
+
+        return program
+
+
+class WorkoutProgramExerciseSerializer(serializers.ModelSerializer):
+    exercise = ExerciseSerializer(read_only=True)
+
+    class Meta:
+        model = WorkoutProgramExercise
+        fields = ['id', 'exercise', 'order', 'target_sets']
+        read_only_fields = ['id']
+
+
+class WorkoutProgramDaySerializer(serializers.ModelSerializer):
+    exercises = WorkoutProgramExerciseSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = WorkoutProgramDay
+        fields = ['id', 'day_number', 'name', 'is_rest_day', 'exercises']
+        read_only_fields = ['id']
+
+
+class WorkoutProgramSerializer(serializers.ModelSerializer):
+    days = WorkoutProgramDaySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = WorkoutProgram
+        fields = ['id', 'name', 'cycle_length', 'is_active', 'days', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class UpdateWorkoutProgramSerializer(serializers.ModelSerializer):
+    """For renaming a program."""
+    class Meta:
+        model = WorkoutProgram
+        fields = ['name']
