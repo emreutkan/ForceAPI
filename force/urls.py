@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/webhooks/revenuecat/', RevenueCatWebhookView.as_view(), name='revenuecat-webhook'),
     path('api/user/', include('user.urls')),
     path('api/workout/', include('workout.urls')),
+    path('api/chat/', include('ai_chat.urls')),
     path('api/exercise/', include('exercise.urls')),
     path('api/measurements/', include('body_measurements.urls')),
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
