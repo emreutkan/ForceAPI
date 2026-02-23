@@ -1,5 +1,22 @@
 from django.urls import path
-from .views import CreateWorkoutView, AddExerciseToWorkoutView, AddExerciseSetToWorkoutExerciseView, GetWorkoutView, GetActiveWorkoutView, DeleteExerciseSetView, DeleteWorkoutExerciseView, UpdateExerciseOrderView, CompleteWorkoutView, DeleteWorkoutView, CheckPreviousWorkoutPerformedView, CheckWorkoutPerformedTodayView, CreateTemplateWorkoutView, GetTemplateWorkoutsView, StartTemplateWorkoutView, DeleteTemplateWorkoutView, UpdateWorkoutView, UpdateExerciseSetView, GetRestTimerStateView, StopRestTimerView, ResumeRestTimerView, CalendarView, GetAvailableYearsView, CalendarStatsView, GetExercise1RMHistoryView, GetExerciseSetHistoryView, GetExerciseLastWorkoutView, GetRecoveryRecommendationsView, GetRestPeriodRecommendationsView, GetTrainingFrequencyRecommendationsView, GetRelevantResearchView, GetMuscleRecoveryStatusView, VolumeAnalysisView, WorkoutSummaryView, UserStatsView, OverloadTrendView, SuggestNextExerciseView, ExerciseOptimizationCheckView
+from .views import (
+    CreateWorkoutView, AddExerciseToWorkoutView, AddExerciseSetToWorkoutExerciseView,
+    GetWorkoutView, GetActiveWorkoutView, DeleteExerciseSetView, DeleteWorkoutExerciseView,
+    UpdateExerciseOrderView, CompleteWorkoutView, DeleteWorkoutView,
+    CheckPreviousWorkoutPerformedView, CheckWorkoutPerformedTodayView,
+    CreateTemplateWorkoutView, GetTemplateWorkoutsView, StartTemplateWorkoutView,
+    DeleteTemplateWorkoutView, UpdateWorkoutView, UpdateExerciseSetView,
+    GetRestTimerStateView, StopRestTimerView, ResumeRestTimerView,
+    CalendarView, GetAvailableYearsView, CalendarStatsView,
+    GetExercise1RMHistoryView, GetExerciseSetHistoryView, GetExerciseLastWorkoutView,
+    GetRecoveryRecommendationsView, GetRestPeriodRecommendationsView,
+    GetTrainingFrequencyRecommendationsView, GetRelevantResearchView,
+    GetMuscleRecoveryStatusView, VolumeAnalysisView, WorkoutSummaryView,
+    UserStatsView, OverloadTrendView, SuggestNextExerciseView, ExerciseOptimizationCheckView,
+    CreateWorkoutProgramView, GetWorkoutProgramsView, GetWorkoutProgramView,
+    UpdateWorkoutProgramView, DeleteWorkoutProgramView, ActivateWorkoutProgramView,
+    DeactivateWorkoutProgramView, CurrentProgramDayView,
+)
 urlpatterns = [
     path('create/', CreateWorkoutView.as_view(), name='create-workout'),
     path('list/', GetWorkoutView.as_view(), name='list-workouts'),
@@ -45,4 +62,13 @@ urlpatterns = [
     path('template/list/', GetTemplateWorkoutsView.as_view(), name='list-template-workouts'),
     path('template/delete/<int:template_id>/', DeleteTemplateWorkoutView.as_view(), name='delete-template-workout'),
     path('template/start/', StartTemplateWorkoutView.as_view(), name='start-template-workout'),
+    # Workout program (split) endpoints
+    path('program/create/', CreateWorkoutProgramView.as_view(), name='create-workout-program'),
+    path('program/list/', GetWorkoutProgramsView.as_view(), name='list-workout-programs'),
+    path('program/current-day/', CurrentProgramDayView.as_view(), name='current-program-day'),
+    path('program/<int:program_id>/', GetWorkoutProgramView.as_view(), name='get-workout-program'),
+    path('program/<int:program_id>/update/', UpdateWorkoutProgramView.as_view(), name='update-workout-program'),
+    path('program/<int:program_id>/delete/', DeleteWorkoutProgramView.as_view(), name='delete-workout-program'),
+    path('program/<int:program_id>/activate/', ActivateWorkoutProgramView.as_view(), name='activate-workout-program'),
+    path('program/<int:program_id>/deactivate/', DeactivateWorkoutProgramView.as_view(), name='deactivate-workout-program'),
 ]

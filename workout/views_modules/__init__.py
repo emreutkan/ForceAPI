@@ -65,6 +65,17 @@ from .workout_analytics import (
     OverloadTrendView,
 )
 
+from .workout_programs import (
+    CreateWorkoutProgramView,
+    GetWorkoutProgramsView,
+    GetWorkoutProgramView,
+    UpdateWorkoutProgramView,
+    DeleteWorkoutProgramView,
+    ActivateWorkoutProgramView,
+    DeactivateWorkoutProgramView,
+    CurrentProgramDayView,
+)
+
 # Re-export everything
 __all__ = [
     # CRUD
@@ -113,6 +124,15 @@ __all__ = [
     'WorkoutSummaryView',
     'UserStatsView',
     'OverloadTrendView',
+    # Programs
+    'CreateWorkoutProgramView',
+    'GetWorkoutProgramsView',
+    'GetWorkoutProgramView',
+    'UpdateWorkoutProgramView',
+    'DeleteWorkoutProgramView',
+    'ActivateWorkoutProgramView',
+    'DeactivateWorkoutProgramView',
+    'CurrentProgramDayView',
     # Pagination
     'WorkoutPagination',
 ]

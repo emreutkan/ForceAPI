@@ -41,11 +41,12 @@ class ChatSessionViewSet(viewsets.ModelViewSet):
         # Build conversation history for the LLM
         messages = [{'role': 'system', 'content': system_content}]
 
-        history = session.messages.order_by('created_at').values_list('role', 'content')[-20:]
-        for role, content in history:
+        history = list(session.messages.order_by('-created_at')[:20])
+        history.reverse()  # back to chronological order for the LLM
+        for msg in history:
             # Map our 'ai' role to the OpenAI-compatible 'assistant' role
-            api_role = 'assistant' if role == 'ai' else role
-            messages.append({'role': api_role, 'content': content})
+            api_role = 'assistant' if msg.role == 'ai' else msg.role
+            messages.append({'role': api_role, 'content': msg.content})
 
         # Call LLM
         try:
