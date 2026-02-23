@@ -310,9 +310,33 @@ class CompleteWorkoutView(APIView):
 
             update_fields = ['is_done']
 
+            normalize_duration = request.data.get('normalize_duration') == True
+            proceed_as_is = request.data.get('proceed_as_is') == True
+
             if 'duration' in request.data:
                 try:
-                    workout.duration = int(request.data['duration'])
+                    requested_duration = int(request.data['duration'])
+
+                    # Calculate theoretical duration
+                    calculated_duration = 0
+                    workout_exercises = WorkoutExercise.objects.filter(workout=workout)
+                    for we in workout_exercises:
+                        for s in we.sets.all():
+                            calculated_duration += getattr(s, 'rest_time_before_set', 0) or 0
+                            calculated_duration += getattr(s, 'total_tut', 0) or 0
+
+                    # Apply logic
+                    if requested_duration > calculated_duration * 2 and not (normalize_duration or proceed_as_is):
+                        return Response({
+                            'error': 'EXCESSIVE_DURATION',
+                            'message': 'Workout duration seems excessively long. Normalize or proceed?'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    if normalize_duration:
+                        workout.duration = calculated_duration * 2
+                    else:
+                        workout.duration = requested_duration
+
                     update_fields.append('duration')
                 except (ValueError, TypeError):
                     return Response({'error': 'Duration must be an integer (seconds)'}, status=status.HTTP_400_BAD_REQUEST)
