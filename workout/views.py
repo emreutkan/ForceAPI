@@ -61,6 +61,9 @@ from .views_modules import (
     ActivateWorkoutProgramView,
     DeactivateWorkoutProgramView,
     CurrentProgramDayView,
+    # Personal Records
+    PersonalRecordsListView,
+    ExercisePersonalRecordView,
 )
 
 # Re-export everything for backward compatibility
@@ -113,4 +116,6 @@ __all__ = [
     'ActivateWorkoutProgramView',
     'DeactivateWorkoutProgramView',
     'CurrentProgramDayView',
+    'PersonalRecordsListView',
+    'ExercisePersonalRecordView',
 ]

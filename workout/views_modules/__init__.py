@@ -76,6 +76,11 @@ from .workout_programs import (
     CurrentProgramDayView,
 )
 
+from .workout_pr import (
+    PersonalRecordsListView,
+    ExercisePersonalRecordView,
+)
+
 # Re-export everything
 __all__ = [
     # CRUD
@@ -133,6 +138,9 @@ __all__ = [
     'ActivateWorkoutProgramView',
     'DeactivateWorkoutProgramView',
     'CurrentProgramDayView',
+    # Personal Records
+    'PersonalRecordsListView',
+    'ExercisePersonalRecordView',
     # Pagination
     'WorkoutPagination',
 ]
