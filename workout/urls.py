@@ -16,6 +16,7 @@ from .views import (
     CreateWorkoutProgramView, GetWorkoutProgramsView, GetWorkoutProgramView,
     UpdateWorkoutProgramView, DeleteWorkoutProgramView, ActivateWorkoutProgramView,
     DeactivateWorkoutProgramView, CurrentProgramDayView,
+    PersonalRecordsListView, ExercisePersonalRecordView,
 )
 urlpatterns = [
     path('create/', CreateWorkoutView.as_view(), name='create-workout'),
@@ -71,4 +72,7 @@ urlpatterns = [
     path('program/<int:program_id>/delete/', DeleteWorkoutProgramView.as_view(), name='delete-workout-program'),
     path('program/<int:program_id>/activate/', ActivateWorkoutProgramView.as_view(), name='activate-workout-program'),
     path('program/<int:program_id>/deactivate/', DeactivateWorkoutProgramView.as_view(), name='deactivate-workout-program'),
+    # Personal Records endpoints
+    path('personal-records/', PersonalRecordsListView.as_view(), name='personal-records-list'),
+    path('personal-records/<int:exercise_id>/', ExercisePersonalRecordView.as_view(), name='exercise-personal-record'),
 ]

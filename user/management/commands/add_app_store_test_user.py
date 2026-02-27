@@ -5,9 +5,11 @@ Use the same credentials in App Store Connect > Users and Access > Sandbox teste
 and for signing in from the app when using Sandbox environment.
 """
 import random
+import requests
 from decimal import Decimal
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection
 from django.utils import timezone
@@ -15,7 +17,7 @@ from django.utils import timezone
 from user.models import CustomUser, UserProfile, WeightHistory
 from body_measurements.models import BodyMeasurement
 from exercise.models import Exercise
-from workout.models import Workout, WorkoutExercise, ExerciseSet
+from workout.models import Workout, WorkoutExercise, ExerciseSet, WorkoutProgram, WorkoutProgramDay, WorkoutProgramExercise
 
 
 # Credentials for App Store / TestFlight testing (document in App Store Connect sandbox testers)
@@ -71,7 +73,6 @@ class Command(BaseCommand):
             },
         )
 
-        user.set_password(password)
         user.is_verified = True
         user.first_name = user.first_name or "App Store"
         user.last_name = user.last_name or "Tester"
@@ -80,6 +81,10 @@ class Command(BaseCommand):
         if grant_pro:
             user.is_pro = True
             user.pro_until = timezone.now() + timedelta(days=30)
+
+        supabase_uid = self._upsert_supabase_user(user, email, password)
+        if supabase_uid:
+            user.supabase_uid = supabase_uid
 
         user.save()
 
@@ -103,10 +108,52 @@ class Command(BaseCommand):
         self._add_weight_history(user)
         self._add_body_measurements(user)
         workout_count = self._add_sample_workouts(user)
+        program = self._add_workout_program(user)
         self.stdout.write(self.style.SUCCESS(f"  Weight history: 12 entries"))
         self.stdout.write(self.style.SUCCESS(f"  Body measurements: 3 entries"))
         self.stdout.write(self.style.SUCCESS(f"  Workouts: {workout_count}"))
+        if program:
+            self.stdout.write(self.style.SUCCESS(f"  Program: {program.name} (active, currently on Day 2 - Pull Day)"))
         self._remind_sandbox()
+
+    def _upsert_supabase_user(self, django_user, email, password):
+        service_key = settings.SUPABASE_SERVICE_ROLE_KEY
+        supabase_url = settings.SUPABASE_URL
+        if not service_key or not supabase_url:
+            self.stdout.write(self.style.WARNING("SUPABASE_SERVICE_ROLE_KEY not set — skipping Supabase user creation."))
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {service_key}",
+            "apikey": service_key,
+            "Content-Type": "application/json",
+        }
+
+        # If we already have the UID, update password + email in Supabase
+        if django_user.supabase_uid:
+            resp = requests.put(
+                f"{supabase_url}/auth/v1/admin/users/{django_user.supabase_uid}",
+                headers=headers,
+                json={"email": email, "password": password, "email_confirm": True},
+            )
+            if resp.status_code == 200:
+                self.stdout.write(self.style.SUCCESS(f"  Supabase user updated (uid: {django_user.supabase_uid})"))
+                return str(django_user.supabase_uid)
+            self.stdout.write(self.style.ERROR(f"  Supabase update failed: {resp.text}"))
+            return None
+
+        # Create new Supabase user
+        resp = requests.post(
+            f"{supabase_url}/auth/v1/admin/users",
+            headers=headers,
+            json={"email": email, "password": password, "email_confirm": True},
+        )
+        if resp.status_code == 200:
+            uid = resp.json()["id"]
+            self.stdout.write(self.style.SUCCESS(f"  Supabase user created (uid: {uid})"))
+            return uid
+        self.stdout.write(self.style.ERROR(f"  Supabase user creation failed: {resp.text}"))
+        return None
 
     def _remind_sandbox(self):
         self.stdout.write(
@@ -211,3 +258,50 @@ class Command(BaseCommand):
                     pass
                 workout_count += 1
         return workout_count
+
+    def _add_workout_program(self, user):
+        WorkoutProgram.objects.filter(user=user).delete()
+
+        exercises = list(Exercise.objects.filter(is_active=True)[:30])
+        if not exercises:
+            self.stdout.write(self.style.WARNING("No exercises in DB; skipping workout program."))
+            return None
+
+        def find_exercise(name_part):
+            for e in exercises:
+                if name_part.lower() in e.name.lower() or e.name.lower() in name_part.lower():
+                    return e
+            return random.choice(exercises)
+
+        # 4-day PPL+Rest cycle. activated_at=1 day ago → user is currently on Day 2 (Pull Day).
+        program = WorkoutProgram.objects.create(
+            user=user,
+            name="Push / Pull / Legs",
+            cycle_length=4,
+            is_active=True,
+            activated_at=timezone.now() - timedelta(days=1),
+        )
+
+        day_templates = [
+            {"day_number": 1, "name": "Push Day",  "is_rest_day": False, "exercises": ["Bench Press", "Overhead Press", "Tricep", "Lateral Raise"]},
+            {"day_number": 2, "name": "Pull Day",  "is_rest_day": False, "exercises": ["Row", "Pull", "Curl", "Face Pull"]},
+            {"day_number": 3, "name": "Leg Day",   "is_rest_day": False, "exercises": ["Squat", "Deadlift", "Leg Press", "Leg Curl"]},
+            {"day_number": 4, "name": "Rest Day",  "is_rest_day": True,  "exercises": []},
+        ]
+
+        for day_data in day_templates:
+            day = WorkoutProgramDay.objects.create(
+                program=program,
+                day_number=day_data["day_number"],
+                name=day_data["name"],
+                is_rest_day=day_data["is_rest_day"],
+            )
+            for order, name_part in enumerate(day_data["exercises"]):
+                WorkoutProgramExercise.objects.create(
+                    program_day=day,
+                    exercise=find_exercise(name_part),
+                    order=order,
+                    target_sets=4 if order == 0 else 3,
+                )
+
+        return program
