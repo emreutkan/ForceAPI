@@ -4,7 +4,6 @@ Deterministic workout coaching built only from logged workout data.
 from collections import defaultdict
 from datetime import timedelta
 
-from django.db.models import Count
 from django.utils import timezone
 
 from exercise.models import Exercise
@@ -45,13 +44,99 @@ POSITIVE_CODES = {
     'undertrained_opportunity',
 }
 
+SUPPORTED_MUSCLE_GROUPS = {choice[0] for choice in Exercise.MUSCLE_GROUPS}
+BACK_SUBGROUPS = {'lats', 'traps', 'lower_back'}
+MUSCLE_DISPLAY_NAMES = {
+    'chest': 'Chest',
+    'shoulders': 'Shoulders',
+    'biceps': 'Biceps',
+    'triceps': 'Triceps',
+    'forearms': 'Forearms',
+    'lats': 'Lats',
+    'traps': 'Upper back',
+    'lower_back': 'Lower back',
+    'quads': 'Quads',
+    'hamstrings': 'Hamstrings',
+    'glutes': 'Glutes',
+    'calves': 'Calves',
+    'abs': 'Abs',
+    'obliques': 'Obliques',
+    'abductors': 'Abductors',
+    'adductors': 'Adductors',
+}
+
+
+def _get_legacy_back_text(exercise):
+    return ' '.join(
+        part.strip().lower()
+        for part in (exercise.name, exercise.description, exercise.instructions)
+        if part
+    )
+
+
+def _normalize_muscle_group(muscle_group, exercise=None):
+    if muscle_group != 'back':
+        return muscle_group
+
+    if not exercise:
+        return 'lats'
+
+    text = _get_legacy_back_text(exercise)
+
+    lower_back_terms = (
+        'lower back',
+        'deadlift',
+        'romanian deadlift',
+        'rdl',
+        'hyperextension',
+        'back extension',
+        'good morning',
+    )
+    if any(term in text for term in lower_back_terms):
+        return 'lower_back'
+
+    upper_back_terms = (
+        'upper back',
+        'trap',
+        'shrug',
+        'rear delt',
+        'face pull',
+    )
+    if any(term in text for term in upper_back_terms):
+        return 'traps'
+
+    return 'lats'
+
+
+def _get_primary_muscle(exercise):
+    primary = _normalize_muscle_group(exercise.primary_muscle, exercise=exercise)
+    return primary if primary in SUPPORTED_MUSCLE_GROUPS else exercise.primary_muscle
+
+
+def _get_secondary_muscles(exercise):
+    normalized = []
+    seen = set()
+    for muscle_group in exercise.secondary_muscles or []:
+        if not muscle_group:
+            continue
+        resolved = _normalize_muscle_group(muscle_group, exercise=exercise)
+        if resolved not in SUPPORTED_MUSCLE_GROUPS or resolved in seen:
+            continue
+        seen.add(resolved)
+        normalized.append(resolved)
+    return normalized
+
+
+def _format_muscle_group(muscle_group):
+    return MUSCLE_DISPLAY_NAMES.get(muscle_group, muscle_group.replace('_', ' ').capitalize())
+
 
 def _serialize_exercise_brief(exercise):
     return {
         'id': exercise.id,
         'name': exercise.name,
-        'primary_muscle': exercise.primary_muscle,
-        'secondary_muscles': [m for m in (exercise.secondary_muscles or []) if m],
+        'primary_muscle': _get_primary_muscle(exercise),
+        'secondary_muscles': _get_secondary_muscles(exercise),
         'category': exercise.category,
         'equipment_type': exercise.equipment_type,
     }
@@ -178,7 +263,7 @@ def get_active_workout_muscle_sets(active_workout):
         return counts
 
     for workout_exercise in active_workout.workoutexercise_set.all():
-        counts[workout_exercise.exercise.primary_muscle] += workout_exercise.sets.filter(
+        counts[_get_primary_muscle(workout_exercise.exercise)] += workout_exercise.sets.filter(
             is_warmup=False
         ).count()
     return counts
@@ -208,12 +293,12 @@ def get_weekly_muscle_set_load(user, reference_time=None, days=7):
             if set_count == 0:
                 continue
 
-            primary = workout_exercise.exercise.primary_muscle
-            counts[primary] += float(set_count)
+            primary = _get_primary_muscle(workout_exercise.exercise)
+            if primary in SUPPORTED_MUSCLE_GROUPS:
+                counts[primary] += float(set_count)
 
-            for secondary in workout_exercise.exercise.secondary_muscles or []:
-                if secondary:
-                    counts[secondary] += round(set_count * 0.5, 1)
+            for secondary in _get_secondary_muscles(workout_exercise.exercise):
+                counts[secondary] += round(set_count * 0.5, 1)
 
     return {key: round(value, 1) for key, value in counts.items()}
 
@@ -240,7 +325,9 @@ def get_days_since_last_trained(user, reference_time=None):
     )
 
     for workout_exercise in exercises:
-        primary = workout_exercise.exercise.primary_muscle
+        primary = _get_primary_muscle(workout_exercise.exercise)
+        if primary not in values:
+            continue
         if values.get(primary) is not None:
             continue
         delta = reference_time.date() - workout_exercise.workout.datetime.date()
@@ -382,22 +469,30 @@ def get_exercise_performance_snapshot(user, exercise_id, current_workout_exercis
 
 def _pick_exercise_candidates_for_muscle(user, muscle_group, blocked_secondaries=None, exclude_exercise_id=None):
     blocked_secondaries = set(blocked_secondaries or [])
-    usage_counts = dict(
+    candidate_muscles = {muscle_group}
+    if muscle_group in BACK_SUBGROUPS:
+        candidate_muscles.add('back')
+
+    usage_counts = defaultdict(int)
+    recent_usage = (
         WorkoutExercise.objects
         .filter(
             workout__user=user,
-            exercise__primary_muscle=muscle_group,
+            exercise__primary_muscle__in=candidate_muscles,
         )
-        .values('exercise_id')
-        .annotate(total=Count('id'))
-        .values_list('exercise_id', 'total')
+        .select_related('exercise')
     )
+    for workout_exercise in recent_usage:
+        if _get_primary_muscle(workout_exercise.exercise) == muscle_group:
+            usage_counts[workout_exercise.exercise_id] += 1
 
     candidates = []
-    for exercise in Exercise.objects.filter(primary_muscle=muscle_group, is_active=True):
+    for exercise in Exercise.objects.filter(primary_muscle__in=candidate_muscles, is_active=True):
+        if _get_primary_muscle(exercise) != muscle_group:
+            continue
         if exclude_exercise_id and exercise.id == exclude_exercise_id:
             continue
-        secondaries = {muscle for muscle in (exercise.secondary_muscles or []) if muscle}
+        secondaries = set(_get_secondary_muscles(exercise))
         blocked_overlap = len(secondaries & blocked_secondaries)
         candidates.append(
             (
@@ -416,15 +511,15 @@ def _pick_exercise_candidates_for_muscle(user, muscle_group, blocked_secondaries
 def pick_swap_exercise(user, exercise, recovery_map):
     blocked_secondaries = [
         muscle
-        for muscle in (exercise.secondary_muscles or [])
-        if muscle and recovery_map.get(muscle, 100.0) < SECONDARY_RECOVERY_SWAP
+        for muscle in _get_secondary_muscles(exercise)
+        if recovery_map.get(muscle, 100.0) < SECONDARY_RECOVERY_SWAP
     ]
     if not blocked_secondaries:
         return None
 
     candidates = _pick_exercise_candidates_for_muscle(
         user,
-        exercise.primary_muscle,
+        _get_primary_muscle(exercise),
         blocked_secondaries=blocked_secondaries,
         exclude_exercise_id=exercise.id,
     )
@@ -449,8 +544,9 @@ def evaluate_exercise_action(
 ):
     active_sets_by_muscle = active_sets_by_muscle or {}
     planned_sets = planned_sets or 3
-    primary = exercise.primary_muscle
-    secondaries = [muscle for muscle in (exercise.secondary_muscles or []) if muscle]
+    primary = _get_primary_muscle(exercise)
+    primary_label = _format_muscle_group(primary)
+    secondaries = _get_secondary_muscles(exercise)
     primary_recovery = recovery_map.get(primary, 100.0)
     blocked_secondaries = [
         muscle
@@ -485,7 +581,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'under_recovered',
                 'error',
-                f'{primary.replace("_", " ").capitalize()} is only {primary_recovery:.0f}% recovered, so this exercise should be skipped today.',
+                f'{primary_label} is only {primary_recovery:.0f}% recovered, so this exercise should be skipped today.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -502,7 +598,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'too_much_volume',
                 'error',
-                f'{primary.replace("_", " ").capitalize()} already has {in_session_sets} working sets in this session.',
+                f'{primary_label} already has {in_session_sets} working sets in this session.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -649,7 +745,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'too_much_volume',
                 'warning',
-                f'{primary.replace("_", " ").capitalize()} is already above its recent weekly set target.',
+                f'{primary_label} is already above its recent weekly set target.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -666,7 +762,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'too_little_frequency',
                 'warning',
-                f'{primary.replace("_", " ").capitalize()} has not been trained in {days_gap} days.',
+                f'{primary_label} has not been trained in {days_gap} days.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -680,7 +776,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'undertrained_opportunity',
                 'info',
-                f'{primary.replace("_", " ").capitalize()} is fresh and below its weekly set target.',
+                f'{primary_label} is fresh and below its weekly set target.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -713,7 +809,7 @@ def evaluate_exercise_action(
             _build_finding(
                 'balanced_volume',
                 'info',
-                f'{primary.replace("_", " ").capitalize()} is in a good recovery and volume window.',
+                f'{primary_label} is in a good recovery and volume window.',
                 {
                     'exercise_id': exercise.id,
                     'muscle_group': primary,
@@ -815,7 +911,7 @@ def build_workout_coach_review(user, workout):
     primary_set_counts = defaultdict(int)
 
     for workout_exercise in workout_exercises:
-        primary_set_counts[workout_exercise.exercise.primary_muscle] += workout_exercise.sets.filter(
+        primary_set_counts[_get_primary_muscle(workout_exercise.exercise)] += workout_exercise.sets.filter(
             is_warmup=False
         ).count()
 
@@ -831,6 +927,7 @@ def build_workout_coach_review(user, workout):
 
     for workout_exercise in workout_exercises:
         exercise = workout_exercise.exercise
+        primary = _get_primary_muscle(exercise)
         action = evaluate_exercise_action(
             user=user,
             exercise=exercise,
@@ -838,25 +935,25 @@ def build_workout_coach_review(user, workout):
             weekly_sets=weekly_before,
             days_since_last=days_since_before,
             cns_recovery=cns_recovery,
-            active_sets_by_muscle={exercise.primary_muscle: primary_set_counts[exercise.primary_muscle]},
-            planned_sets=primary_set_counts[exercise.primary_muscle] or 3,
+            active_sets_by_muscle={primary: primary_set_counts[primary]},
+            planned_sets=primary_set_counts[primary] or 3,
             current_workout_exercise=workout_exercise,
         )
         action['workout_exercise_id'] = workout_exercise.id
-        action['evidence']['pre_recovery_percent'] = pre_recovery.get(exercise.primary_muscle)
+        action['evidence']['pre_recovery_percent'] = pre_recovery.get(primary)
         exercise_actions.append(action)
         findings.extend(action['findings'])
 
-        if pre_recovery.get(exercise.primary_muscle, 100.0) >= READY_TO_TRAIN_RECOVERY:
+        if pre_recovery.get(primary, 100.0) >= READY_TO_TRAIN_RECOVERY:
             findings.append(
                 _build_finding(
                     'well_recovered_training',
                     'info',
-                    f'{exercise.primary_muscle.replace("_", " ").capitalize()} started this session in a good recovery state.',
+                    f'{_format_muscle_group(primary)} started this session in a good recovery state.',
                     {
                         'exercise_id': exercise.id,
-                        'muscle_group': exercise.primary_muscle,
-                        'recovery_percent': pre_recovery.get(exercise.primary_muscle),
+                        'muscle_group': primary,
+                        'recovery_percent': pre_recovery.get(primary),
                     },
                 )
             )
@@ -1118,6 +1215,7 @@ def build_active_workout_coach(user):
     findings = []
     exercise_actions = []
     for workout_exercise in active_workout.workoutexercise_set.all():
+        primary = _get_primary_muscle(workout_exercise.exercise)
         action = evaluate_exercise_action(
             user=user,
             exercise=workout_exercise.exercise,
@@ -1126,7 +1224,7 @@ def build_active_workout_coach(user):
             days_since_last=days_since_last,
             cns_recovery=cns_recovery,
             active_sets_by_muscle=active_sets,
-            planned_sets=max(active_sets.get(workout_exercise.exercise.primary_muscle, 0), 1),
+            planned_sets=max(active_sets.get(primary, 0), 1),
             current_workout_exercise=workout_exercise,
         )
         action['workout_exercise_id'] = workout_exercise.id

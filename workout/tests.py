@@ -51,6 +51,22 @@ class WorkoutTestCase(TestCase):
             equipment_type='barbell',
             category='compound'
         )
+        self.legacy_lat_back = Exercise.objects.create(
+            name='Legacy Lat Pulldown',
+            description='Lat-focused cable pulldown for back width',
+            primary_muscle='back',
+            secondary_muscles=['biceps'],
+            equipment_type='cable',
+            category='compound'
+        )
+        self.legacy_upper_back = Exercise.objects.create(
+            name='Legacy Wide Grip Row',
+            description='Upper back focus row',
+            primary_muscle='back',
+            secondary_muscles=['biceps'],
+            equipment_type='machine',
+            category='compound'
+        )
         self.squat = Exercise.objects.create(
             name='Squat',
             primary_muscle='quads',
@@ -285,6 +301,36 @@ class WorkoutTestCase(TestCase):
         self.assertTrue(response.data['exercise_actions'])
         self.assertTrue(
             all(action['exercise']['primary_muscle'] != 'chest' for action in response.data['exercise_actions'])
+        )
+
+    def test_next_coach_normalizes_legacy_back_exercise_to_lats(self):
+        now = timezone.now()
+        self.create_completed_exposure(self.barbell_row, now - timedelta(days=2), 95)
+        self.activate_single_day_program(self.legacy_lat_back, target_sets=3)
+
+        response = self.client.get('/api/workout/coach/next/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action = response.data['exercise_actions'][0]
+
+        self.assertEqual(action['exercise']['primary_muscle'], 'lats')
+        self.assertEqual(action['evidence']['days_since_last_trained'], 2)
+        self.assertNotIn('too_little_frequency', action['reason_codes'])
+        self.assertTrue(all('Back has not been trained' not in finding['message'] for finding in action['findings']))
+
+    def test_next_coach_labels_legacy_upper_back_frequency_as_upper_back(self):
+        now = timezone.now()
+        self.create_completed_exposure(self.legacy_upper_back, now - timedelta(days=9), 95)
+        self.activate_single_day_program(self.legacy_upper_back, target_sets=3)
+
+        response = self.client.get('/api/workout/coach/next/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        action = response.data['exercise_actions'][0]
+
+        self.assertEqual(action['exercise']['primary_muscle'], 'traps')
+        self.assertEqual(action['evidence']['days_since_last_trained'], 9)
+        self.assertIn('too_little_frequency', action['reason_codes'])
+        self.assertTrue(
+            any(finding['message'] == 'Upper back has not been trained in 9 days.' for finding in action['findings'])
         )
 
     def test_coach_review_groups_findings(self):

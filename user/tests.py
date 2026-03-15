@@ -1,4 +1,8 @@
 import unittest
+from io import StringIO
+from datetime import timedelta
+
+from django.core.management import call_command
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
@@ -92,6 +96,55 @@ class UserProfileTestCase(TestCase):
         WeightHistory.objects.create(user=self.user, weight=75.0)
         response = self.client.get('/api/user/weight/history/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+
+class ProManagementCommandTestCase(TestCase):
+    def test_grant_pro_sets_user_as_paid_pro(self):
+        user = User.objects.create_user(
+            email='pro@example.com',
+            password='testpass123'
+        )
+        out = StringIO()
+
+        call_command('grant_pro', '--email', user.email, '--days', '14', stdout=out)
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_pro)
+        self.assertIsNotNone(user.pro_until)
+        self.assertGreater(user.pro_until, timezone.now() + timedelta(days=13))
+
+    def test_grant_pro_permanent_clears_expiration(self):
+        user = User.objects.create_user(
+            email='permanent@example.com',
+            password='testpass123'
+        )
+
+        call_command('grant_pro', '--email', user.email, '--permanent')
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_pro)
+        self.assertIsNone(user.pro_until)
+
+    def test_refresh_pro_statuses_disables_only_expired_users(self):
+        expired_user = User.objects.create_user(
+            email='expired@example.com',
+            password='testpass123',
+            is_pro=True,
+            pro_until=timezone.now() - timedelta(minutes=5)
+        )
+        active_user = User.objects.create_user(
+            email='active@example.com',
+            password='testpass123',
+            is_pro=True,
+            pro_until=timezone.now() + timedelta(days=5)
+        )
+
+        call_command('refresh_pro_statuses')
+
+        expired_user.refresh_from_db()
+        active_user.refresh_from_db()
+        self.assertFalse(expired_user.is_pro)
+        self.assertTrue(active_user.is_pro)
 
 
 @unittest.skip("Auth is handled by Supabase; no Django password-reset endpoint.")

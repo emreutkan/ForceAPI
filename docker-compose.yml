@@ -37,40 +37,6 @@ services:
       retries: 10
       start_period: 30s
 
-  redis:
-    networks:
-      - force-network
-    image: redis:7-alpine
-    profiles: ["observability"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  sentry:
-    networks:
-      - force-network
-    image: getsentry/sentry:24.1.0
-    profiles: ["observability"]
-    environment:
-      SENTRY_SECRET_KEY: ${SENTRY_SECRET_KEY:-change-me}
-      SENTRY_DB_USER: ${POSTGRES_USER:-force}
-      SENTRY_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      SENTRY_DB_NAME: ${POSTGRES_DB:-force_db}
-      SENTRY_DB_HOST: db
-      SENTRY_REDIS_HOST: redis
-    command: sh -c "sentry upgrade --noinput && sentry run web"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "9000:9000"
-    volumes:
-      - sentry_data:/var/lib/sentry/files
-
   web:
     networks:
       - force-network
@@ -126,4 +92,3 @@ networks:
 volumes: # volumes are used to persist data across container restarts
   db_data: # db data volume : /var/lib/postgresql/data
   vector_data: # vector db data volume
-  sentry_data:

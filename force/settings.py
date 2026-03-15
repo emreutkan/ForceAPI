@@ -1,8 +1,12 @@
+import logging
 import os
 import warnings
 from pathlib import Path
 
 import environ
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 # Initialize environ
 env = environ.Env()
@@ -274,6 +278,23 @@ LOGS_DIR = _resolve_logs_dir()
 LLM_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/'
 LLM_MODEL = env('GEMINI_MODEL', default='gemini-2.0-flash')
 LLM_API_KEY = env('GEMINI_API_KEY')
+
+SENTRY_DSN = env('SENTRY_DSN', default='')
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[
+            DjangoIntegration(),
+            LoggingIntegration(
+                level=logging.WARNING,       # Capture WARNING+ as breadcrumbs
+                event_level=logging.ERROR,   # Send ERROR+ as Sentry events
+            ),
+        ],
+        traces_sample_rate=0.2,
+        send_default_pii=True,
+        environment='development' if IS_LOCAL else 'production',
+    )
 
 LOGGING = {
     'version': 1,
