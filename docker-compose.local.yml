@@ -79,7 +79,7 @@ services:
       dockerfile: Dockerfile
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
-      - .:/app              # mount source code for hot reload
+      - .:/app # mount source code for hot reload
       - ./staticfiles:/app/staticfiles
       - ./media:/app/media
       - ./logs:/app/logs

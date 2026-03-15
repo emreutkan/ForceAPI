@@ -4,71 +4,28 @@ All views are now organized in workout/views_modules/ for better maintainability
 """
 
 # Import all views from organized modules
-from .views_modules import (
-    # CRUD operations
-    CreateWorkoutView,
-    GetWorkoutView,
-    GetActiveWorkoutView,
-    UpdateWorkoutView,
-    DeleteWorkoutView,
-    CompleteWorkoutView,
-    CheckPreviousWorkoutPerformedView,
-    CheckWorkoutPerformedTodayView,
-    TotalWorkoutsPerformedView,
-    WorkoutPagination,
-    # Exercise management
-    AddExerciseToWorkoutView,
-    AddExerciseSetToWorkoutExerciseView,
-    UpdateExerciseSetView,
-    DeleteExerciseSetView,
-    DeleteWorkoutExerciseView,
-    UpdateExerciseOrderView,
-    # History & Calendar
-    GetExercise1RMHistoryView,
-    GetExerciseSetHistoryView,
-    GetExerciseLastWorkoutView,
-    CalendarView,
-    GetAvailableYearsView,
-    CalendarStatsView,
-    # Templates
-    CreateTemplateWorkoutView,
-    GetTemplateWorkoutsView,
-    DeleteTemplateWorkoutView,
-    StartTemplateWorkoutView,
-    # Timer
-    GetRestTimerStateView,
-    StopRestTimerView,
-    ResumeRestTimerView,
-    # Recovery
-    GetRecoveryRecommendationsView,
-    GetRestPeriodRecommendationsView,
-    GetTrainingFrequencyRecommendationsView,
-    GetRelevantResearchView,
-    GetMuscleRecoveryStatusView,
-    SuggestNextExerciseView,
-    ExerciseOptimizationCheckView,
-    # Analytics
-    VolumeAnalysisView,
-    WorkoutSummaryView,
-    UserStatsView,
-    OverloadTrendView,
-    CoachReviewView,
-    NextWorkoutCoachView,
-    ActiveWorkoutCoachView,
-    # Programs
-    CreateWorkoutProgramView,
-    GetWorkoutProgramsView,
-    GetWorkoutProgramView,
-    UpdateWorkoutProgramView,
-    DeleteWorkoutProgramView,
-    ActivateWorkoutProgramView,
-    DeactivateWorkoutProgramView,
-    CurrentProgramDayView,
-    StartWorkoutFromProgramView,
-    # Personal Records
-    PersonalRecordsListView,
-    ExercisePersonalRecordView,
-)
+from .views_modules import (  # CRUD operations; Exercise management; History & Calendar; Templates; Timer; Recovery; Analytics; Programs; Personal Records
+    ActivateWorkoutProgramView, ActiveWorkoutCoachView,
+    AddExerciseSetToWorkoutExerciseView, AddExerciseToWorkoutView,
+    CalendarStatsView, CalendarView, CheckPreviousWorkoutPerformedView,
+    CheckWorkoutPerformedTodayView, CoachReviewView, CompleteWorkoutView,
+    CreateTemplateWorkoutView, CreateWorkoutProgramView, CreateWorkoutView,
+    CurrentProgramDayView, DeactivateWorkoutProgramView, DeleteExerciseSetView,
+    DeleteTemplateWorkoutView, DeleteWorkoutExerciseView,
+    DeleteWorkoutProgramView, DeleteWorkoutView, ExerciseOptimizationCheckView,
+    ExercisePersonalRecordView, GetActiveWorkoutView, GetAvailableYearsView,
+    GetExercise1RMHistoryView, GetExerciseLastWorkoutView,
+    GetExerciseSetHistoryView, GetMuscleRecoveryStatusView,
+    GetRecoveryRecommendationsView, GetRelevantResearchView,
+    GetRestPeriodRecommendationsView, GetRestTimerStateView,
+    GetTemplateWorkoutsView, GetTrainingFrequencyRecommendationsView,
+    GetWorkoutProgramsView, GetWorkoutProgramView, GetWorkoutView,
+    NextWorkoutCoachView, OverloadTrendView, PersonalRecordsListView,
+    ResumeRestTimerView, StartTemplateWorkoutView, StartWorkoutFromProgramView,
+    StopRestTimerView, SuggestNextExerciseView, TotalWorkoutsPerformedView,
+    UpdateExerciseOrderView, UpdateExerciseSetView, UpdateWorkoutProgramView,
+    UpdateWorkoutView, UserStatsView, VolumeAnalysisView, WorkoutPagination,
+    WorkoutSummaryView)
 
 # Re-export everything for backward compatibility
 __all__ = [

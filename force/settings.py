@@ -1,7 +1,8 @@
 import os
 import warnings
-import environ
 from pathlib import Path
+
+import environ
 
 # Initialize environ
 env = environ.Env()
