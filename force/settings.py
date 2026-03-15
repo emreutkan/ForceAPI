@@ -246,8 +246,28 @@ REST_FRAMEWORK = {
 }
 
 # Logging Configuration
-LOGS_DIR = BASE_DIR / 'logs'
-LOGS_DIR.mkdir(exist_ok=True)  # Create logs directory if it doesn't exist
+def _resolve_logs_dir():
+    preferred_logs_dir = BASE_DIR / 'logs'
+    fallback_logs_dir = BASE_DIR / 'runtime_logs'
+
+    for candidate in (preferred_logs_dir, fallback_logs_dir):
+        try:
+            if candidate.exists():
+                if candidate.is_dir():
+                    return candidate
+            else:
+                candidate.mkdir(parents=True, exist_ok=True)
+                return candidate
+        except FileExistsError:
+            continue
+        except OSError:
+            continue
+
+    fallback_logs_dir.mkdir(parents=True, exist_ok=True)
+    return fallback_logs_dir
+
+
+LOGS_DIR = _resolve_logs_dir()
 
 # LLM Configuration
 # Priority: GEMINI=True > LOCAL_LLM=False (DeepSeek) > LOCAL_LLM=True (Ollama)
