@@ -82,6 +82,7 @@ from .workout_programs import (
     ActivateWorkoutProgramView,
     DeactivateWorkoutProgramView,
     CurrentProgramDayView,
+    StartWorkoutFromProgramView,
 )
 
 from .workout_pr import (
@@ -149,6 +150,7 @@ __all__ = [
     'ActivateWorkoutProgramView',
     'DeactivateWorkoutProgramView',
     'CurrentProgramDayView',
+    'StartWorkoutFromProgramView',
     # Personal Records
     'PersonalRecordsListView',
     'ExercisePersonalRecordView',

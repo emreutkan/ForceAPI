@@ -2,15 +2,15 @@ services:
   db:
     networks:
       - force-network
-    image: postgres:16 # postgres:16-alpine
+    image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-force}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-force_db}
     volumes:
-      - db_data:/var/lib/postgresql/data # postgres data volume
+      - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432" # postgres port
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -21,7 +21,7 @@ services:
   vectordb:
     networks:
       - force-network
-    image: pgvector/pgvector:pg16 # postgres:16 with pgvector
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-force}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -75,10 +75,11 @@ services:
     networks:
       - force-network
     build:
-      context: . # context is the root directory of the project
+      context: .
       dockerfile: Dockerfile
-    command: sh -c "python manage.py collectstatic --noinput && python manage.py migrate && gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 120 force.wsgi:application"
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
+      - .:/app              # mount source code for hot reload
       - ./staticfiles:/app/staticfiles
       - ./media:/app/media
       - ./logs:/app/logs
@@ -89,41 +90,18 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       VECTOR_DATABASE_URL: postgresql://${POSTGRES_USER:-force}:${POSTGRES_PASSWORD}@vectordb:5432/vector_db
-      LOCALHOST: ${LOCALHOST}
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 8000))",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    depends_on: # before web service starts, db service must be healthy
-      db: # db service
-        condition: service_healthy # check if db service is healthy
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
-    networks:
-      - force-network
+      LOCALHOST: "True"
     depends_on:
-      web:
+      db:
         condition: service_healthy
-    restart: unless-stopped
 
 networks:
   force-network:
     driver: bridge
     driver_opts:
       com.docker.network.driver.mtu: 1500
-volumes: # volumes are used to persist data across container restarts
-  db_data: # db data volume : /var/lib/postgresql/data
-  vector_data: # vector db data volume
+
+volumes:
+  db_data:
+  vector_data:
   sentry_data:

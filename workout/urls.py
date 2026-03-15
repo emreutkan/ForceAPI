@@ -16,7 +16,7 @@ from .views import (
     CoachReviewView, NextWorkoutCoachView, ActiveWorkoutCoachView,
     CreateWorkoutProgramView, GetWorkoutProgramsView, GetWorkoutProgramView,
     UpdateWorkoutProgramView, DeleteWorkoutProgramView, ActivateWorkoutProgramView,
-    DeactivateWorkoutProgramView, CurrentProgramDayView,
+    DeactivateWorkoutProgramView, CurrentProgramDayView, StartWorkoutFromProgramView,
     PersonalRecordsListView, ExercisePersonalRecordView,
 )
 urlpatterns = [
@@ -71,6 +71,7 @@ urlpatterns = [
     path('program/create/', CreateWorkoutProgramView.as_view(), name='create-workout-program'),
     path('program/list/', GetWorkoutProgramsView.as_view(), name='list-workout-programs'),
     path('program/current-day/', CurrentProgramDayView.as_view(), name='current-program-day'),
+    path('program/start-today/', StartWorkoutFromProgramView.as_view(), name='start-workout-from-program'),
     path('program/<int:program_id>/', GetWorkoutProgramView.as_view(), name='get-workout-program'),
     path('program/<int:program_id>/update/', UpdateWorkoutProgramView.as_view(), name='update-workout-program'),
     path('program/<int:program_id>/delete/', DeleteWorkoutProgramView.as_view(), name='delete-workout-program'),

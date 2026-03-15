@@ -64,6 +64,7 @@ from .views_modules import (
     ActivateWorkoutProgramView,
     DeactivateWorkoutProgramView,
     CurrentProgramDayView,
+    StartWorkoutFromProgramView,
     # Personal Records
     PersonalRecordsListView,
     ExercisePersonalRecordView,
@@ -122,6 +123,7 @@ __all__ = [
     'ActivateWorkoutProgramView',
     'DeactivateWorkoutProgramView',
     'CurrentProgramDayView',
+    'StartWorkoutFromProgramView',
     'PersonalRecordsListView',
     'ExercisePersonalRecordView',
 ]

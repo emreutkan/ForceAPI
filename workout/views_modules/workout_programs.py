@@ -6,12 +6,13 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 
 
-from ..models import WorkoutProgram, Workout
+from ..models import WorkoutProgram, WorkoutExercise, Workout
 from ..serializers import (
     CreateWorkoutProgramSerializer,
     WorkoutProgramSerializer,
     WorkoutProgramDaySerializer,
     UpdateWorkoutProgramSerializer,
+    GetWorkoutSerializer,
 )
 
 
@@ -249,4 +250,76 @@ class CurrentProgramDayView(APIView):
             'current_day_number': current_day_number,
             'current_day': WorkoutProgramDaySerializer(current_day).data,
         })
+
+
+class StartWorkoutFromProgramView(APIView):
+    """
+    POST /api/workout/program/start-today/
+
+    Creates an active workout from the current day of the user's active program.
+    Blocks if an active (incomplete) workout already exists.
+
+    Response: the newly created workout (same shape as GetWorkoutSerializer).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        # 1. Find active program
+        program = WorkoutProgram.objects.filter(
+            user=request.user, is_active=True
+        ).prefetch_related('days__exercises__exercise').first()
+
+        if not program:
+            return Response(
+                {'error': 'NO_ACTIVE_PROGRAM', 'message': 'No active workout program found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # 2. Guard: no existing active workout
+        active_workout = Workout.objects.filter(user=request.user, is_done=False).first()
+        if active_workout:
+            return Response(
+                {
+                    'error': 'ACTIVE_WORKOUT_EXISTS',
+                    'active_workout': active_workout.id,
+                    'message': 'Complete or delete the existing active workout first.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3. Determine today's program day (same logic as CurrentProgramDayView)
+        count_from = program.activated_at or program.created_at
+        days_completed = Workout.objects.filter(
+            user=request.user,
+            is_done=True,
+            datetime__gte=count_from,
+        ).count()
+        current_day_number = (days_completed % program.cycle_length) + 1
+
+        try:
+            current_day = program.days.get(day_number=current_day_number)
+        except Exception:
+            return Response(
+                {'error': 'DAY_NOT_FOUND', 'message': f'Day {current_day_number} not found in program.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # 4. Create the workout
+        workout = Workout.objects.create(
+            user=request.user,
+            title=current_day.name,
+            is_done=False,
+        )
+
+        # 5. Add exercises from the program day (skip rest days — no exercises)
+        for program_exercise in current_day.exercises.all():
+            WorkoutExercise.objects.create(
+                workout=workout,
+                exercise=program_exercise.exercise,
+                order=program_exercise.order,
+            )
+
+        return Response(GetWorkoutSerializer(workout).data, status=status.HTTP_201_CREATED)
 
