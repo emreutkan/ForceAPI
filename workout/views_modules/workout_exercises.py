@@ -8,6 +8,7 @@ from rest_framework import status
 from django.db import transaction
 from django.db.models import Max
 from exercise.models import Exercise
+from ..coaching import build_active_workout_coach
 from ..models import Workout, WorkoutExercise, ExerciseSet
 from ..serializers import WorkoutExerciseSerializer, ExerciseSetSerializer
 from ..utils import recalculate_workout_metrics
@@ -41,7 +42,9 @@ class AddExerciseToWorkoutView(APIView):
             serializer = WorkoutExerciseSerializer(data=data)
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+                payload = dict(serializer.data)
+                payload['coach'] = build_active_workout_coach(request.user)
+                return Response(payload, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -90,7 +93,9 @@ class AddExerciseSetToWorkoutExerciseView(APIView):
                     workout.save(update_fields=['rest_timer_paused_at'])
                 recalculate_workout_metrics(workout)
 
-                return Response(serializer.data, status=status.HTTP_201_CREATED)
+                payload = dict(serializer.data)
+                payload['coach'] = build_active_workout_coach(request.user)
+                return Response(payload, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -124,7 +129,9 @@ class UpdateExerciseSetView(APIView):
                 workout = exercise_set.workout_exercise.workout
                 recalculate_workout_metrics(workout)
 
-                return Response(serializer.data, status=status.HTTP_200_OK)
+                payload = dict(serializer.data)
+                payload['coach'] = build_active_workout_coach(request.user)
+                return Response(payload, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except ExerciseSet.DoesNotExist:
             return Response({'error': 'Set not found'}, status=status.HTTP_404_NOT_FOUND)

@@ -65,6 +65,14 @@ from .workout_analytics import (
     OverloadTrendView,
 )
 
+from .workout_coaching import (
+    CoachReviewView,
+    NextWorkoutCoachView,
+    ActiveWorkoutCoachView,
+    SuggestNextExerciseView,
+    ExerciseOptimizationCheckView,
+)
+
 from .workout_programs import (
     CreateWorkoutProgramView,
     GetWorkoutProgramsView,
@@ -129,6 +137,9 @@ __all__ = [
     'WorkoutSummaryView',
     'UserStatsView',
     'OverloadTrendView',
+    'CoachReviewView',
+    'NextWorkoutCoachView',
+    'ActiveWorkoutCoachView',
     # Programs
     'CreateWorkoutProgramView',
     'GetWorkoutProgramsView',

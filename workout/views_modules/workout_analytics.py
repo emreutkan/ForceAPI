@@ -12,31 +12,14 @@ from datetime import datetime, timedelta, date as date_type
 from collections import defaultdict
 from exercise.models import Exercise
 from core.mixins import ConditionalGetMixin
+from ..coaching import build_workout_coach_review
+from ..constants import WEEKLY_SET_TARGETS
 from ..models import Workout, WorkoutExercise, WorkoutMuscleRecovery, ExerciseSet
 from ..permissions import is_pro_user, get_pro_response
 
 
 # --- Science-Based Volume Targets (Schoenfeld / Israetel MEV–MAV–MRV) ---
 # Values: (min_sets_per_week, max_sets_per_week) for hypertrophy
-WEEKLY_SET_TARGETS = {
-    'chest':      (10, 20),
-    'shoulders':  (16, 22),
-    'biceps':     (14, 20),
-    'triceps':    (10, 14),
-    'forearms':   (10, 14),
-    'lats':       (10, 20),
-    'traps':      (12, 20),
-    'lower_back': (6,  10),
-    'quads':      (12, 20),
-    'hamstrings': (10, 16),
-    'glutes':     (4,  12),
-    'calves':     (8,  16),
-    'abs':        (16, 20),
-    'obliques':   (0,  16),
-    'abductors':  (0,  16),
-    'adductors':  (0,  16),
-}
-
 # --- Antagonist Pair Definitions ---
 # (muscle_a, muscle_b, max_imbalance_ratio, label)
 ANTAGONIST_PAIRS = [
@@ -608,6 +591,16 @@ class WorkoutSummaryView(ConditionalGetMixin, APIView):
             'recommendation': recommendation,
         }
 
+        coach_review = build_workout_coach_review(request.user, workout)
+        if coach_review['findings']:
+            top_finding = coach_review['findings'][0]
+            next_changes = coach_review['what_to_change_next_time']
+            diagnosis = {
+                'primary_issue': top_finding['code'],
+                'message': top_finding['message'],
+                'recommendation': next_changes[0]['message'] if next_changes else recommendation,
+            }
+
         return Response({
             'workout_id': workout.id,
             'score': score,
@@ -621,8 +614,9 @@ class WorkoutSummaryView(ConditionalGetMixin, APIView):
                 'muscles_worked': sorted(muscles_worked),
                 'exercises_performed': len(exercise_1rm_data),
             },
-            'diagnosis':            diagnosis,
-            'is_pro':               is_pro,
+            'diagnosis': diagnosis,
+            'coach_review': coach_review,
+            'is_pro': is_pro,
             'has_advanced_insights': is_pro,
         }, status=status.HTTP_200_OK)
 
